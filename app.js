@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 31;
+const APP_VERSION = 32;
 
 const state = {
   view: "today",
@@ -81,7 +81,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=31" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=32" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -681,7 +681,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=31" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=32" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -1752,7 +1752,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=32").catch(() => {});
   });
 }
 
