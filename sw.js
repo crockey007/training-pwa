@@ -1,4 +1,4 @@
-const CACHE = "home-gym-v26";
+const CACHE = "home-gym-v27";
 const SHELL = [
   "./",
   "./index.html",
@@ -8,7 +8,6 @@ const SHELL = [
   "./coach.js",
   "./app.js",
   "./styles.css",
-  "./update.html",
   "./manifest.webmanifest",
   "./icon-180.png",
 ];
@@ -27,6 +26,11 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.pathname.endsWith("/update.html")) {
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
+    return;
+  }
   event.respondWith(
     fetch(event.request, { cache: "no-store" })
       .then((res) => {

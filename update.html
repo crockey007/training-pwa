@@ -29,7 +29,10 @@
         color: #8b95a5;
         line-height: 1.6;
       }
-      button {
+      button,
+      a.btn {
+        display: block;
+        box-sizing: border-box;
         margin-top: 20px;
         width: 100%;
         border: 0;
@@ -39,20 +42,31 @@
         color: #fff;
         font-size: 17px;
         font-weight: 800;
+        text-align: center;
+        text-decoration: none;
+      }
+      button:disabled {
+        opacity: 0.6;
       }
     </style>
   </head>
   <body>
     <main>
       <h1>最新版に更新します</h1>
-      <p>ホーム画面の Training から開いてください。Safariだと別アプリです。</p>
-      <p id="msg">古いキャッシュを消して、最新の画面を読み込みます。</p>
+      <p>この赤いボタンを押してください。押すまでは画面はそのままです。</p>
+      <p id="msg">古い保存データを消して、アプリを開き直します。</p>
       <button type="button" id="go">更新してアプリを開く</button>
     </main>
     <script>
+      var running = false;
       async function refreshApp() {
+        if (running) return;
+        running = true;
+        var btn = document.getElementById("go");
         var msg = document.getElementById("msg");
-        msg.textContent = "キャッシュを削除しています…";
+        btn.disabled = true;
+        btn.textContent = "更新しています…";
+        msg.textContent = "キャッシュを削除しています。このまま待ってください。";
         try {
           if (navigator.serviceWorker) {
             var regs = await navigator.serviceWorker.getRegistrations();
@@ -63,13 +77,13 @@
             await Promise.all(keys.map(function (k) { return caches.delete(k); }));
           }
         } catch (e) {}
+        await new Promise(function (resolve) { setTimeout(resolve, 1200); });
         var dest = new URL("./index.html", location.href);
-        dest.searchParams.set("v", "26");
+        dest.searchParams.set("v", "27");
         dest.searchParams.set("t", String(Date.now()));
-        location.replace(dest.href);
+        location.href = dest.href;
       }
       document.getElementById("go").addEventListener("click", refreshApp);
-      refreshApp();
     </script>
   </body>
 </html>

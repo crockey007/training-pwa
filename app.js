@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 26;
+const APP_VERSION = 27;
 
 const state = {
   view: "today",
@@ -79,7 +79,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=27" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -662,7 +662,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=27" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -1174,7 +1174,7 @@ function lifeHtml() {
     <section class="card">
       <h3>アプリの修復</h3>
       <p class="muted">画面が v22 のまま、白い画面、更新されないときはこちら。ホーム画面のアプリから開いてください。</p>
-      <a class="btn" href="./update.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
+      <a class="btn" href="./update.html?v=27" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
       <p style="margin-top:10px">${repairLinkHtml()}</p>
     </section>
   `;
@@ -1543,7 +1543,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=26").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=27").catch(() => {});
   });
 }
 
