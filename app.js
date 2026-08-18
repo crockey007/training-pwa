@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 29;
+const APP_VERSION = 30;
 
 const state = {
   view: "today",
@@ -80,7 +80,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=29" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=30" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -680,7 +680,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=29" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=30" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -940,16 +940,17 @@ function runCardHtml(date) {
       run.done
         ? `<div class="metric-grid" style="margin-top:12px">
         <div>
-          <div class="metric-label">距離</div>
-          <input class="num-input" type="number" inputmode="decimal" min="0" max="80" step="0.01" value="${run.km || ""}" data-run-km="${date}" placeholder="5.20" />
-          <div class="muted" style="margin-top:4px">km</div>
+          <div class="metric-label">距離 km</div>
+          ${stepperHtml(`run-km:${date}`, Number(run.km) || 0, "km")}
+          <input class="num-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" value="${run.km || ""}" data-run-km="${date}" placeholder="例 5.20" />
         </div>
         <div>
           <div class="metric-label">消費カロリー</div>
-          <input class="num-input" type="number" inputmode="numeric" min="0" max="2000" step="1" value="${run.kcal || ""}" data-run-kcal="${date}" placeholder="320" />
-          <div class="muted" style="margin-top:4px">kcal</div>
+          ${stepperHtml(`run-kcal:${date}`, Number(run.kcal) || 0, "")}
+          <input class="num-input" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" value="${run.kcal || ""}" data-run-kcal="${date}" placeholder="例 320" />
         </div>
       </div>
+      <p class="muted" style="margin-top:8px">±でも、Garminの数字を直接入力しても大丈夫です。</p>
       <button class="btn" type="button" data-save-run="${date}" style="margin-top:12px">ランを保存</button>`
         : ""
     }
@@ -1409,12 +1410,34 @@ function bind() {
       render();
     })
   );
+  document.querySelectorAll("[data-run-km], [data-run-kcal]").forEach((el) => {
+    el.addEventListener("click", (ev) => ev.stopPropagation());
+    el.addEventListener("touchstart", (ev) => ev.stopPropagation(), { passive: true });
+    el.addEventListener("focus", () => {
+      setTimeout(() => {
+        try {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+        } catch {
+          /* ignore */
+        }
+      }, 300);
+    });
+    el.addEventListener("change", () => {
+      const date = el.dataset.runKm || el.dataset.runKcal;
+      const run = todayRun(date);
+      const kmEl = document.querySelector(`[data-run-km="${date}"]`);
+      const kcalEl = document.querySelector(`[data-run-kcal="${date}"]`);
+      const km = kmEl ? Math.max(0, Number(String(kmEl.value).replace(",", ".")) || 0) : run.km || 0;
+      const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : run.kcal || 0;
+      upsertByDate("runs", { ...run, date, done: true, km: roundStep(km, 0.01), kcal });
+    });
+  });
   document.querySelectorAll("[data-save-run]").forEach((el) =>
     el.addEventListener("click", () => {
       const date = el.dataset.saveRun;
       const kmEl = document.querySelector(`[data-run-km="${date}"]`);
       const kcalEl = document.querySelector(`[data-run-kcal="${date}"]`);
-      const km = kmEl ? Math.max(0, Number(kmEl.value) || 0) : 0;
+      const km = kmEl ? Math.max(0, Number(String(kmEl.value).replace(",", ".")) || 0) : 0;
       const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : 0;
       upsertByDate("runs", { date, done: true, km: roundStep(km, 0.01), kcal });
       refreshCoachPlan();
@@ -1523,6 +1546,21 @@ function applyStep(key, delta) {
     const sleep = todaySleep();
     const hours = Math.max(4, Math.min(12, roundStep((sleep.hours || 7) + delta * 0.5, 0.5)));
     upsertByDate("sleeps", { ...sleep, hours });
+    render();
+    return;
+  }
+  if (key.startsWith("run-km:") || key.startsWith("run-kcal:")) {
+    const isKm = key.startsWith("run-km:");
+    const date = key.slice(isKm ? 7 : 9);
+    const run = todayRun(date);
+    if (isKm) {
+      const km = Math.max(0, roundStep((Number(run.km) || 0) + delta * 0.1, 0.1));
+      upsertByDate("runs", { ...run, date, done: true, km });
+    } else {
+      const kcal = Math.max(0, (Number(run.kcal) || 0) + delta * 10);
+      upsertByDate("runs", { ...run, date, done: true, kcal });
+    }
+    refreshCoachPlan();
     render();
     return;
   }
@@ -1686,7 +1724,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=29").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=30").catch(() => {});
   });
 }
 

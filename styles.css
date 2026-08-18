@@ -1002,11 +1002,17 @@ h3 {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--text);
+  background: #fff;
+  color: #111;
   border-radius: 12px;
-  padding: 12px 10px;
-  font-size: 18px;
+  padding: 14px 12px;
+  font-size: 22px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  margin-top: 8px;
+  -webkit-user-select: text;
+  user-select: text;
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
 }

@@ -12,7 +12,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icon-180.png" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <link rel="stylesheet" href="./styles.css?v=29" />
+    <link rel="stylesheet" href="./styles.css?v=30" />
     <style>
       html,
       body {
@@ -63,7 +63,7 @@
         var url = "./update.html";
         var el = document.getElementById("repair-hint");
         if (el) {
-          el.innerHTML = 'うまく開かないときは <a href="./update.html?v=29">最新版に更新する</a>';
+          el.innerHTML = 'うまく開かないときは <a href="./update.html?v=30">最新版に更新する</a>';
         }
       })();
       window.__bootFailed = function (msg) {
@@ -72,7 +72,7 @@
         app.innerHTML =
           '<main id="boot"><h2>起動できませんでした</h2><p>' +
           (msg || "古い画面が残っている可能性があります。") +
-          '</p><p><a class="boot-btn" href="./update.html?v=29">最新版に更新する</a></p></main>';
+          '</p><p><a class="boot-btn" href="./update.html?v=30">最新版に更新する</a></p></main>';
       };
       window.addEventListener("error", function (ev) {
         if (document.getElementById("boot")) window.__bootFailed(ev.message || "読み込みエラー");
@@ -83,14 +83,14 @@
           var url = "./update.html";
           var p = boot.querySelector("p");
           if (p) {
-            p.innerHTML = 'まだ読み込めない場合は <a href="./update.html?v=29">最新版に更新する</a> を開いてください。';
+            p.innerHTML = 'まだ読み込めない場合は <a href="./update.html?v=30">最新版に更新する</a> を開いてください。';
           }
         }
       }, 8000);
     </script>
-    <script src="./data.js?v=29"></script>
-    <script src="./restore-data.js?v=29"></script>
-    <script src="./coach.js?v=29"></script>
-    <script src="./app.js?v=29"></script>
+    <script src="./data.js?v=30"></script>
+    <script src="./restore-data.js?v=30"></script>
+    <script src="./coach.js?v=30"></script>
+    <script src="./app.js?v=30"></script>
   </body>
 </html>
