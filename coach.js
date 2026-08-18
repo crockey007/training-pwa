@@ -203,6 +203,10 @@ const CoachEngine = {
       }
     }
 
+    const runMap = {};
+    (data.runs || []).forEach((row) => {
+      if (row && row.date && (row.done || row.km > 0)) runMap[row.date] = row;
+    });
     days.forEach((day) => {
       if (day.kind === "done") {
         const meta = SESSION_META[day.sessionType];
@@ -214,6 +218,13 @@ const CoachEngine = {
         const meta = SESSION_META[day.sessionType];
         day.label = `${day.sessionType}${meta?.name || ""}`;
         day.detail = day.isNext ? "次のトレーニング" : day.optional ? "余裕があれば" : "予定";
+        return;
+      }
+      const run = runMap[day.date];
+      if (run) {
+        day.kind = "run";
+        day.label = run.km ? `ラン${run.km}km` : "ラン済";
+        day.detail = `${run.km || "—"}km · ${run.kcal || "—"}kcal`;
         return;
       }
       const weekend = day.weekday === "土" || day.weekday === "日";

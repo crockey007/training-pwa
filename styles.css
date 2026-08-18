@@ -971,3 +971,42 @@ h3 {
   font-size: 13px;
   font-weight: 700;
 }
+
+.pick-scroll {
+  height: 148px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+  margin-top: 10px;
+}
+
+.pick-opt {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 700;
+  padding: 12px 0;
+}
+
+.pick-opt.active {
+  color: var(--text);
+  background: var(--red-dim);
+}
+
+.num-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 10px;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 28;
+const APP_VERSION = 29;
 
 const state = {
   view: "today",
@@ -13,6 +13,7 @@ const state = {
   showNextPreview: false,
   reviewing: false,
   editDraft: null,
+  runDate: null,
 };
 
 let syncTimer = null;
@@ -79,7 +80,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=28" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=29" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -118,6 +119,7 @@ function mergeAll(local, remote) {
     meals: mergeByDate(localOk.meals, remoteOk.meals),
     sleeps: mergeByDate(localOk.sleeps, remoteOk.sleeps),
     weights: mergeByDate(localOk.weights, remoteOk.weights),
+    runs: mergeByDate(localOk.runs, remoteOk.runs),
     draft: localOk.draft && localOk.draft.date === todayStr() ? localOk.draft : remoteOk.draft ?? localOk.draft,
     profileStartDate: localOk.profileStartDate || remoteOk.profileStartDate || PROFILE.startDate,
     pendingSync: false,
@@ -291,6 +293,7 @@ function db() {
     weights: data.weights || [],
     draft: data.draft || null,
     coachPlan: data.coachPlan || null,
+    runs: data.runs || [],
   };
 }
 
@@ -465,6 +468,24 @@ function todayMeal() {
   return db().meals.find((m) => m.date === todayStr()) || { date: todayStr(), protein: 0, quality: "", note: "" };
 }
 
+function todayRun(date = todayStr()) {
+  return (
+    db().runs.find((r) => r.date === date) || {
+      date,
+      done: false,
+      km: 0,
+      kcal: 0,
+    }
+  );
+}
+
+function proteinOptions() {
+  const max = 250;
+  const opts = [];
+  for (let n = 0; n <= max; n += 10) opts.push(n);
+  return opts;
+}
+
 function todaySleep() {
   return db().sleeps.find((s) => s.date === todayStr()) || { date: todayStr(), hours: 7, quality: "", note: "" };
 }
@@ -491,10 +512,7 @@ function todayBody() {
 }
 
 function chartSeries(key) {
-  const logs = sortedBodyLogs().filter((row) => row[key] != null);
-  const series = [{ date: "開始", [key]: PROFILE[key === "kg" ? "startWeightKg" : "startBodyFat"], baseline: true }];
-  logs.forEach((row) => series.push(row));
-  return series;
+  return sortedBodyLogs().filter((row) => row[key] != null);
 }
 
 function lineChartSvg(series, key, color, unit) {
@@ -527,7 +545,7 @@ function lineChartSvg(series, key, color, unit) {
   const deltaClass = delta > 0 ? "up" : delta < 0 ? "down" : "";
   return `<div class="chart-head">
       <div><span class="chart-value">${last[key]}${unit}</span><span class="chart-delta ${deltaClass}">${deltaLabel}</span></div>
-      <span class="muted">${points.length - 1}件の記録</span>
+      <span class="muted">${points.length}件の記録</span>
     </div>
     <svg class="chart-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${key === "kg" ? "体重" : "体脂肪率"}の推移">
       ${yTicks
@@ -542,7 +560,7 @@ function lineChartSvg(series, key, color, unit) {
       ${coords
         .map(
           (c, i) => `<circle class="chart-dot" cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${i === coords.length - 1 ? 4 : 3}" fill="${color}" />
-            <text class="chart-label" x="${c.x.toFixed(1)}" y="${H - 4}" text-anchor="middle">${c.p.baseline ? "開始" : c.p.date.slice(5).replace("-", "/")}</text>`
+            <text class="chart-label" x="${c.x.toFixed(1)}" y="${H - 4}" text-anchor="middle">${c.p.date.slice(5).replace("-", "/")}</text>`
         )
         .join("")}
     </svg>`;
@@ -662,12 +680,12 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=28" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=29" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
     ${tabbar()}
-    ${state.sheet ? sheetHtml() : ""}${state.historyDate ? historySheetHtml() : ""}${nextPreviewHtml()}
+    ${state.sheet ? sheetHtml() : ""}${state.historyDate ? historySheetHtml() : ""}${state.runDate ? runSheetHtml() : ""}${nextPreviewHtml()}
     ${restTimerBar()}
   `;
     bind();
@@ -728,6 +746,7 @@ function todayHtml() {
     </section>`
       : ""}
     ${weekCalendarHtml()}
+    ${runCardHtml(todayStr())}
     <section class="card accent">
       <div class="kicker">自動コーチ · ${phaseLabel()} · ${todayStr().replaceAll("-", ".")} ${weekdayJa(todayStr())}</div>
       <h2 style="margin-top:8px">${escapeHtml(sug.title)}</h2>
@@ -795,7 +814,9 @@ function weekCalendarHtml() {
               ? `data-hist="${day.date}"`
               : day.kind === "train" && day.isToday
                 ? `data-start="${day.sessionType}"`
-                : "";
+                : day.kind === "run" || day.kind === "rest"
+                  ? `data-log-run="${day.date}"`
+                  : "";
           const tag = action ? "button" : "div";
           const typeAttr = tag === "button" ? ' type="button"' : "";
           return `<${tag} class="${cls}" ${action}${typeAttr}>
@@ -896,6 +917,51 @@ function nextPreviewHtml() {
     ${last ? reviewBlockHtml(last.review, last.date) : ""}
     ${nextBlock}
     <button class="btn" type="button" data-close-preview-btn="1" style="margin-top:16px">OK</button>
+  </div></div>`;
+}
+
+function runCardHtml(date) {
+  const run = todayRun(date);
+  const isToday = date === todayStr();
+  return `<section class="card">
+    <div class="row">
+      <div>
+        <div class="kicker">ラン · Garmin</div>
+        <h3>${isToday ? "今日のラン" : date.replaceAll("-", ".") + " のラン"}</h3>
+      </div>
+      <span class="muted">${run.done ? "記録済" : "未記録"}</span>
+    </div>
+    <p class="muted">走った日は「ランした」を選んで、Garminの距離と消費カロリーを入れてください。</p>
+    <div class="pills" style="margin-top:10px">
+      <button class="pill ${!run.done ? "active" : ""}" type="button" data-run-done="${date}:0">やっていない</button>
+      <button class="pill good ${run.done ? "active" : ""}" type="button" data-run-done="${date}:1">ランした</button>
+    </div>
+    ${
+      run.done
+        ? `<div class="metric-grid" style="margin-top:12px">
+        <div>
+          <div class="metric-label">距離</div>
+          <input class="num-input" type="number" inputmode="decimal" min="0" max="80" step="0.01" value="${run.km || ""}" data-run-km="${date}" placeholder="5.20" />
+          <div class="muted" style="margin-top:4px">km</div>
+        </div>
+        <div>
+          <div class="metric-label">消費カロリー</div>
+          <input class="num-input" type="number" inputmode="numeric" min="0" max="2000" step="1" value="${run.kcal || ""}" data-run-kcal="${date}" placeholder="320" />
+          <div class="muted" style="margin-top:4px">kcal</div>
+        </div>
+      </div>
+      <button class="btn" type="button" data-save-run="${date}" style="margin-top:12px">ランを保存</button>`
+        : ""
+    }
+  </section>`;
+}
+
+function runSheetHtml() {
+  if (!state.runDate) return "";
+  return `<div class="sheet-bg" data-close-run="1"><div class="sheet" data-stop="1">
+    <button class="sheet-back dark" type="button" data-close-btn="1">‹ 戻る</button>
+    <div class="handle"></div>
+    <div style="margin-top:36px">${runCardHtml(state.runDate)}</div>
   </div></div>`;
 }
 
@@ -1101,20 +1167,20 @@ function lifeHtml() {
   const meals = db().meals;
   return `
     <section class="card">
-      <div class="row"><h3>体重・体脂肪</h3><span class="muted">${body.saved ? "今日記録済" : "未記録"}</span></div>
-      <p class="muted">毎日でなくてOK。同じ条件（朝・空腹など）で測るとグラフが読みやすいです。</p>
+      <div class="row"><h3>今日の体重・体脂肪</h3><span class="muted">${body.saved ? "今日記録済" : "未記録"}</span></div>
+      <p class="muted">±で直す数値は<strong>今日</strong>の記録です。開始時（${PROFILE.startWeightKg}kg / ${PROFILE.startBodyFat}%）は変わりません。</p>
       <div class="metric-grid">
         <div>
-          <div class="metric-label">体重</div>
+          <div class="metric-label">今日の体重</div>
           ${stepperHtml("body-weight", body.kg, "kg")}
         </div>
         <div>
-          <div class="metric-label">体脂肪率</div>
+          <div class="metric-label">今日の体脂肪率</div>
           ${stepperHtml("body-fat", body.bodyFat, "%")}
         </div>
       </div>
       <button class="btn" type="button" data-save-body="1" style="margin-top:12px">今日の数値を記録</button>
-      <p class="muted" style="margin-top:8px">開始時 ${PROFILE.startWeightKg}kg / ${PROFILE.startBodyFat}% · 目標は体脂肪10–12%前後</p>
+      <p class="muted" style="margin-top:8px">目標は体脂肪10–12%前後</p>
     </section>
     <section class="card">
       <h3>体重の推移</h3>
@@ -1141,11 +1207,15 @@ function lifeHtml() {
           .join("")}
       </div>
     </section>
+    ${runCardHtml(todayStr())}
     <section class="card">
       <div class="row"><h3>今日のタンパク質</h3><b>${meal.protein || 0}g</b></div>
       <div class="progress-bar" style="margin:10px 0 12px"><span style="width:${Math.min(100, ((meal.protein || 0) / PROFILE.proteinTargetG) * 100)}%"></span></div>
-      <div class="pills">
-        ${[60, 90, 130, 160].map((n) => `<button class="pill ${meal.protein === n ? "active" : ""}" data-protein="${n}">${n}g</button>`).join("")}
+      <p class="muted">10g刻み。指でスクロールして選んでください。目安は ${PROFILE.proteinTargetG}g です。</p>
+      <div class="pick-scroll" data-protein-scroll="1">
+        ${proteinOptions()
+          .map((n) => `<button class="pick-opt ${Number(meal.protein) === n ? "active" : ""}" type="button" data-protein="${n}">${n}g</button>`)
+          .join("")}
       </div>
       <h3 style="margin-top:16px">食べ具合</h3>
       <div class="pills" style="margin-top:8px">
@@ -1324,6 +1394,43 @@ function bind() {
       openOverlay("hist", el.dataset.hist);
     })
   );
+  document.querySelectorAll("[data-log-run]").forEach((el) =>
+    el.addEventListener("click", () => {
+      openOverlay("run", el.dataset.logRun);
+    })
+  );
+  document.querySelectorAll("[data-run-done]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const [date, flag] = el.dataset.runDone.split(":");
+      const done = flag === "1";
+      const current = todayRun(date);
+      upsertByDate("runs", { ...current, date, done, km: done ? current.km : 0, kcal: done ? current.kcal : 0 });
+      refreshCoachPlan();
+      render();
+    })
+  );
+  document.querySelectorAll("[data-save-run]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const date = el.dataset.saveRun;
+      const kmEl = document.querySelector(`[data-run-km="${date}"]`);
+      const kcalEl = document.querySelector(`[data-run-kcal="${date}"]`);
+      const km = kmEl ? Math.max(0, Number(kmEl.value) || 0) : 0;
+      const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : 0;
+      upsertByDate("runs", { date, done: true, km: roundStep(km, 0.01), kcal });
+      refreshCoachPlan();
+      render();
+    })
+  );
+  document.querySelectorAll("[data-close-run]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      if (ev.target === el) closeOverlay();
+    })
+  );
+  const proteinScroll = document.querySelector("[data-protein-scroll]");
+  const proteinActive = proteinScroll && proteinScroll.querySelector(".pick-opt.active");
+  if (proteinScroll && proteinActive) {
+    proteinScroll.scrollTop = proteinActive.offsetTop - proteinScroll.clientHeight / 2 + proteinActive.clientHeight / 2;
+  }
   document.querySelectorAll("[data-rest]").forEach((el) =>
     el.addEventListener("click", () => startRestTimer(el.dataset.rest.split(":")[0]))
   );
@@ -1357,6 +1464,7 @@ function bind() {
 function openOverlay(kind, id) {
   if (kind === "sheet") state.sheet = id;
   if (kind === "hist") state.historyDate = id;
+  if (kind === "run") state.runDate = id;
   history.pushState({ overlay: kind, id }, "");
   render();
 }
@@ -1365,12 +1473,13 @@ function closeOverlay(fromPop = false) {
   const shouldGoBack = !fromPop && Boolean(history.state && history.state.overlay);
   state.sheet = null;
   state.historyDate = null;
+  state.runDate = null;
   render();
   if (shouldGoBack) history.back();
 }
 
 window.addEventListener("popstate", () => {
-  if (state.sheet || state.historyDate) closeOverlay(true);
+  if (state.sheet || state.historyDate || state.runDate) closeOverlay(true);
 });
 
 function historySheetHtml() {
@@ -1577,7 +1686,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=28").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=29").catch(() => {});
   });
 }
 
