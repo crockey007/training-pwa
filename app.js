@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 27;
+const APP_VERSION = 28;
 
 const state = {
   view: "today",
@@ -79,7 +79,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=27" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=28" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -572,18 +572,18 @@ function upsertByDate(listName, item) {
 
 function suggestion() {
   const today = todayStr();
-  const plan = state.coachPlan || ensureCoachPlan();
+  const plan = state.coachPlan || ensureCoachPlan() || {};
   const doneToday = completedWorkouts().find((w) => w.date === today);
   if (doneToday) {
-    const next = plan.weekSchedule?.nextSessionType || plan.nextSessionType;
-    const meta = SESSION_META[next];
+    const next = plan.weekSchedule?.nextSessionType || plan.nextSessionType || "A";
+    const meta = SESSION_META[next] || SESSION_META.A;
     const when = plan.weekSchedule?.nextDate
       ? `${plan.weekSchedule.nextDate.replaceAll("-", "/").slice(5)}（${weekdayJa(plan.weekSchedule.nextDate)}）`
       : "次の空き日";
     return {
       type: next,
       title: `今日の${doneToday.sessionType}は完了`,
-      detail: `${plan.coachNote}\n\n次回予定: ${when} ${next} ${meta.name}（${meta.subtitle}）`,
+      detail: `${plan.coachNote || ""}\n\n次回予定: ${when} ${next} ${meta.name}（${meta.subtitle}）`.trim(),
       action: "次回メニューを見る",
       done: true,
       showNext: true,
@@ -623,8 +623,8 @@ function suggestion() {
     };
   }
   const type = nextSessionType();
-  const meta = SESSION_META[type];
-  const detail = [plan.coachNote, plan.recoveryNote].filter(Boolean).join("\n\n");
+  const meta = SESSION_META[type] || SESSION_META.A;
+  const detail = [plan.coachNote, plan.recoveryNote].filter(Boolean).join("\n\n") || "記録に合わせて次回メニューを組んでいます。";
   return {
     type,
     title: `次回: ${type} ${meta.name}`,
@@ -662,7 +662,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=27" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=28" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -1173,9 +1173,8 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
-      <p class="muted">画面が v22 のまま、白い画面、更新されないときはこちら。ホーム画面のアプリから開いてください。</p>
-      <a class="btn" href="./update.html?v=27" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
-      <p style="margin-top:10px">${repairLinkHtml()}</p>
+      <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。</p>
+      <button class="btn" type="button" data-force-update="1" style="margin-top:12px">最新版に更新する</button>
     </section>
   `;
 }
@@ -1291,6 +1290,13 @@ function bind() {
     el.addEventListener("click", () => {
       saveTodayBody();
       render();
+    })
+  );
+  document.querySelectorAll("[data-force-update]").forEach((el) =>
+    el.addEventListener("click", () => {
+      el.disabled = true;
+      el.textContent = "更新しています…";
+      forceAppRefresh();
     })
   );
   document.querySelectorAll("[data-restore-mac]").forEach((el) => el.addEventListener("click", restoreMacBackup));
@@ -1483,12 +1489,40 @@ function finishWorkout() {
   render();
 }
 
+async function forceAppRefresh() {
+  try {
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    /* ignore */
+  }
+  const dest = new URL("./index.html", location.href);
+  dest.searchParams.set("v", String(APP_VERSION));
+  dest.searchParams.set("t", String(Date.now()));
+  location.href = dest.href;
+}
+
 async function checkAppUpdate() {
-  if (!("serviceWorker" in navigator)) return;
+  try {
+    const res = await withTimeout(fetch(`./app.js?t=${Date.now()}`, { cache: "no-store" }), 4000);
+    const text = await res.text();
+    const match = text.match(/const APP_VERSION = (\d+)/);
+    if (match && Number(match[1]) > APP_VERSION) {
+      await forceAppRefresh();
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     const reg = await navigator.serviceWorker.getRegistration();
-    if (!reg) return;
-    await withTimeout(reg.update(), 3000);
+    if (reg) await withTimeout(reg.update(), 3000);
   } catch {
     /* ignore */
   }
@@ -1543,7 +1577,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=27").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=28").catch(() => {});
   });
 }
 
