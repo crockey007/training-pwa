@@ -12,7 +12,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icon-180.png" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <link rel="stylesheet" href="./styles.css?v=25" />
+    <link rel="stylesheet" href="./styles.css?v=26" />
     <style>
       html,
       body {
@@ -37,6 +37,17 @@
       #boot a {
         color: #6aa6ff;
       }
+      #boot a.boot-btn {
+        display: block;
+        margin-top: 16px;
+        background: #e53935;
+        color: #fff;
+        text-align: center;
+        text-decoration: none;
+        border-radius: 14px;
+        padding: 16px;
+        font-weight: 800;
+      }
     </style>
   </head>
   <body>
@@ -58,13 +69,10 @@
       window.__bootFailed = function (msg) {
         var app = document.getElementById("app");
         if (!app) return;
-        var url = "./update.html";
         app.innerHTML =
           '<main id="boot"><h2>起動できませんでした</h2><p>' +
-          (msg || "ネットワークを確認してください。") +
-          '</p><p><a href="./update.html">' +
-          url +
-          "</a></p></main>";
+          (msg || "古い画面が残っている可能性があります。") +
+          '</p><p><a class="boot-btn" href="./update.html">最新版に更新する</a></p></main>';
       };
       window.addEventListener("error", function (ev) {
         if (document.getElementById("boot")) window.__bootFailed(ev.message || "読み込みエラー");
@@ -80,9 +88,9 @@
         }
       }, 8000);
     </script>
-    <script src="./data.js?v=25"></script>
-    <script src="./restore-data.js?v=25"></script>
-    <script src="./coach.js?v=25"></script>
-    <script src="./app.js?v=25"></script>
+    <script src="./data.js?v=26"></script>
+    <script src="./restore-data.js?v=26"></script>
+    <script src="./coach.js?v=26"></script>
+    <script src="./app.js?v=26"></script>
   </body>
 </html>

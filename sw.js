@@ -1,4 +1,4 @@
-const CACHE = "home-gym-v25";
+const CACHE = "home-gym-v26";
 const SHELL = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const SHELL = [
   "./coach.js",
   "./app.js",
   "./styles.css",
+  "./update.html",
   "./manifest.webmanifest",
   "./icon-180.png",
 ];

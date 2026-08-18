@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 
 const state = {
   view: "today",
@@ -1024,7 +1024,6 @@ function editWorkoutHtml() {
     <button class="btn ghost" data-cancel-edit="1">やめる</button>
   `;
 }
-}
 
 function stepperHtml(key, value, unit) {
   return `<div class="stepper" data-step="${key}">
@@ -1544,7 +1543,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=25").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=26").catch(() => {});
   });
 }
 
