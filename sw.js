@@ -1,4 +1,4 @@
-const CACHE = "home-gym-v22";
+const CACHE = "home-gym-v23";
 const SHELL = [
   "./",
   "./index.html",
@@ -26,11 +26,6 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  const url = new URL(event.request.url);
-  if (url.pathname.startsWith("/api/")) {
-    event.respondWith(fetch(event.request).catch(() => new Response("{}", { status: 503 })));
-    return;
-  }
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetched = fetch(event.request)

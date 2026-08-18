@@ -56,7 +56,7 @@ const CoachEngine = {
       recoveryNote,
       weekSchedule,
       bodySnapshot: body.latest,
-      syncNote: last ? null : "前回ログが未同期でも、週次メニューから次回を提案します。Mac接続時に自動同期されます。",
+      syncNote: last ? null : "前回ログがまだないので、週次メニューから次回を提案します。記録が増えると提案が細かくなります。",
     };
   },
 

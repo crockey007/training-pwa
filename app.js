@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 
 const state = {
   view: "today",
@@ -54,15 +54,6 @@ function save(data) {
 }
 
 function canSync() {
-  if (!location.protocol.startsWith("http")) return false;
-  const host = location.hostname;
-  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return true;
-  const parts = host.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
-  const [a, b] = parts;
-  if (a === 10) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
   return false;
 }
 
@@ -91,13 +82,7 @@ function repairLinkHtml(label) {
 }
 
 function scheduleSync() {
-  if (!canSync()) {
-    state.syncStatus = "offline";
-    return;
-  }
-  state.syncStatus = "pending";
-  clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => syncPush(), 800);
+  state.syncStatus = "idle";
 }
 
 function mergeByDate(listA = [], listB = [], key = "date") {
@@ -184,82 +169,6 @@ function importBackupFile(file) {
   reader.readAsText(file);
 }
 
-async function syncPull() {
-  if (!canSync()) {
-    state.syncStatus = "offline";
-    return false;
-  }
-  try {
-    const res = await withTimeout(fetch("/api/sync", { cache: "no-store" }), 5000);
-    if (!res.ok) throw new Error("pull failed");
-    const remote = await res.json();
-    const local = load();
-    const hasLocalOnly =
-      (local.workouts?.length || 0) > (remote.workouts?.length || 0) ||
-      Boolean(local.pendingSync) ||
-      (local.updatedAt && remote.updatedAt && local.updatedAt > remote.updatedAt);
-    if (hasLocalOnly || !remote.updatedAt) {
-      const merged = mergeAll(local, remote);
-      save(merged);
-      state.coachPlan = merged.coachPlan;
-      await syncPush(true);
-    } else {
-      const merged = mergeAll(local, remote);
-      save(merged);
-      state.coachPlan = merged.coachPlan;
-    }
-    state.syncStatus = "synced";
-    return true;
-  } catch {
-    state.syncStatus = "offline";
-    return false;
-  }
-}
-
-async function syncPush(silent = false) {
-  if (!canSync()) {
-    state.syncStatus = "offline";
-    return;
-  }
-  try {
-    const payload = { ...load(), updatedAt: new Date().toISOString(), device: "iphone" };
-    save(payload);
-    const res = await withTimeout(
-      fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-      5000
-    );
-    if (!res.ok) throw new Error("push failed");
-    save({ ...load(), pendingSync: false });
-    state.syncStatus = "synced";
-    if (!silent) render();
-  } catch {
-    state.syncStatus = "offline";
-    if (!silent) render();
-  }
-}
-
-async function loadCoachPlan() {
-  const local = load().coachPlan;
-  if (local) state.coachPlan = local;
-  if (!canSync()) return;
-  try {
-    const res = await withTimeout(fetch("/api/plan", { cache: "no-store" }), 5000);
-    if (res.ok) {
-      const remote = await res.json();
-      if (!local?.generatedAt || remote.generatedAt > local.generatedAt) {
-        state.coachPlan = remote;
-        save({ ...load(), coachPlan: remote });
-      }
-    }
-  } catch {
-    /* local plan */
-  }
-}
-
 function applyCoachPlan(plan) {
   state.coachPlan = plan;
   patch({ coachPlan: plan });
@@ -314,7 +223,7 @@ function db() {
 }
 
 function patch(partial) {
-  const next = { ...load(), ...partial, updatedAt: new Date().toISOString(), pendingSync: true };
+  const next = { ...load(), ...partial, updatedAt: new Date().toISOString(), pendingSync: false };
   save(next);
   scheduleSync();
 }
@@ -875,11 +784,8 @@ function reviewBlockHtml(review, date) {
          <p class="coach-note"><b>よかった点</b>\n${escapeHtml(review.goods)}\n\n<b>改善点</b>\n${escapeHtml(review.improves)}\n\n<b>前回比</b>\n${escapeHtml(review.vsPrev)}</p>
          <p class="muted">${escapeHtml(review.next)}</p>`
       : "";
-  const wait = state.reviewing ? `<p class="muted">MacのAIで詳しく振り返っています…</p>` : "";
-  const ask =
-    !state.reviewing && review && review.source !== "ollama" && date
-      ? `<button class="btn ghost" type="button" data-ai-review="${date}" style="margin-top:8px">AIで詳しく振り返る</button>`
-      : "";
+  const wait = "";
+  const ask = "";
   return `<section class="review-card">
     <div class="kicker">${source}</div>
     ${wait}
@@ -1037,7 +943,7 @@ function reviewPageHtml() {
     return `<section class="card">
       <div class="kicker">振り返り</div>
       <h2>まだありません</h2>
-      <p class="muted">「記録」でセッションを完了すると、ここに今日の振り返りが出ます。Mac接続時はAIでも詳しく書きます。</p>
+      <p class="muted">「記録」でセッションを完了すると、ここに今日の振り返りが出ます。記録はiPhone内のログから自動で作ります。</p>
     </section>`;
   }
   return workouts
@@ -1136,7 +1042,7 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>データのバックアップ</h3>
-      <p class="muted">今のアプリは iPhone 単体です。GitHub上の公開ページからは、自宅のMacへ自動同期できません（HTTPSのページからMacのhttp通信が止められるため）。Macに残したいときは下で書き出してください。</p>
+      <p class="muted">記録はiPhoneのこのアプリ内に保存されます。Mac同期はありません。機種変更や再インストールのときだけ、下で書き出し／読み込みできます。</p>
       <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
       <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
       <input type="file" accept="application/json,.json" data-import-file="1" hidden />
@@ -1229,12 +1135,6 @@ function bind() {
     );
   });
   document.querySelectorAll("[data-finish]").forEach((el) => el.addEventListener("click", finishWorkout));
-  document.querySelectorAll("[data-ai-review]").forEach((el) =>
-    el.addEventListener("click", () => {
-      const w = completedWorkouts().find((row) => row.date === el.dataset.aiReview);
-      if (w) requestAiReview(w);
-    })
-  );
   document.querySelectorAll("[data-clear-draft]").forEach((el) =>
     el.addEventListener("click", () => {
       patch({ draft: null });
@@ -1441,67 +1341,8 @@ function finishWorkout() {
   state.draft = null;
   state.view = "today";
   state.showNextPreview = true;
-  state.reviewing = true;
-  clearRestTimer();
-  syncPush(true);
-  render();
-  requestAiReview(completed);
-}
-
-async function requestAiReview(workout) {
-  state.reviewing = true;
-  render();
-  if (!canSync()) {
-    state.reviewing = false;
-    render();
-    return;
-  }
-  try {
-    const slim = {
-      date: workout.date,
-      sessionType: workout.sessionType,
-      exercises: workout.exercises,
-    };
-    const res = await fetch("/api/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workout: slim,
-          localReview: workout.review
-            ? {
-                summary: workout.review.summary,
-                goods: workout.review.goods,
-                improves: workout.review.improves,
-                vsPrev: workout.review.vsPrev,
-                next: workout.review.next,
-              }
-            : {},
-        }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.text) {
-        const workouts = db().workouts.map((w) =>
-          w.date === workout.date
-            ? {
-                ...w,
-                review: {
-                  ...(w.review || {}),
-                  aiText: data.text,
-                  source: "ollama",
-                  generatedAt: new Date().toISOString(),
-                },
-              }
-            : w
-        );
-        patch({ workouts });
-      }
-    }
-  } catch {
-    /* local review stays */
-  }
   state.reviewing = false;
-  syncPush(true);
+  clearRestTimer();
   render();
 }
 
@@ -1517,17 +1358,10 @@ async function checkAppUpdate() {
 }
 
 async function refreshFromServer() {
-  state.syncStatus = "pending";
-  render();
   try {
     await checkAppUpdate();
   } catch {
     /* ignore */
-  }
-  try {
-    await syncPull();
-  } catch {
-    state.syncStatus = "offline";
   }
   try {
     ensureReviews();
@@ -1538,11 +1372,6 @@ async function refreshFromServer() {
     ensureCoachPlan();
   } catch (err) {
     console.error(err);
-  }
-  try {
-    await loadCoachPlan();
-  } catch {
-    /* local plan */
   }
   render();
 }
@@ -1568,15 +1397,11 @@ function bootstrap() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") onAppVisible();
   });
-  window.addEventListener("online", () => onAppVisible());
-  setInterval(() => {
-    if (document.visibilityState === "visible" && canSync()) syncPush(true);
-  }, 60000);
 }
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=22").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=23").catch(() => {});
   });
 }
 
