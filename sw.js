@@ -1,9 +1,10 @@
-const CACHE = "home-gym-v21";
+const CACHE = "home-gym-v22";
 const SHELL = [
   "./",
   "./index.html",
   "./open.html",
   "./data.js",
+  "./restore-data.js",
   "./coach.js",
   "./app.js",
   "./styles.css",

@@ -11,7 +11,7 @@
     <title>Training</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icon-180.png" />
-    <link rel="stylesheet" href="./styles.css?v=21" />
+    <link rel="stylesheet" href="./styles.css?v=22" />
     <style>
       html,
       body {
@@ -48,7 +48,7 @@
     </div>
     <script>
       (function () {
-        var url = location.origin + "/update.html";
+        var url = "./update.html";
         var el = document.getElementById("repair-hint");
         if (el) {
           el.innerHTML = 'うまく開かないときは <a href="./update.html">' + url + "</a>";
@@ -57,7 +57,7 @@
       window.__bootFailed = function (msg) {
         var app = document.getElementById("app");
         if (!app) return;
-        var url = location.origin + "/update.html";
+        var url = "./update.html";
         app.innerHTML =
           '<main id="boot"><h2>起動できませんでした</h2><p>' +
           (msg || "ネットワークを確認してください。") +
@@ -71,7 +71,7 @@
       setTimeout(function () {
         var boot = document.getElementById("boot");
         if (boot) {
-          var url = location.origin + "/update.html";
+          var url = "./update.html";
           var p = boot.querySelector("p");
           if (p) {
             p.innerHTML = 'まだ読み込めない場合は <a href="./update.html">' + url + "</a> を開いて修復してください。";
@@ -79,8 +79,9 @@
         }
       }, 8000);
     </script>
-    <script src="./data.js?v=21"></script>
-    <script src="./coach.js?v=21"></script>
-    <script src="./app.js?v=21"></script>
+    <script src="./data.js?v=22"></script>
+    <script src="./restore-data.js?v=22"></script>
+    <script src="./coach.js?v=22"></script>
+    <script src="./app.js?v=22"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 
 const state = {
   view: "today",
@@ -81,7 +81,7 @@ function showBootError(err) {
 }
 
 function repairUrl() {
-  return `${location.origin}/update.html`;
+  return new URL("./update.html", location.href).href;
 }
 
 function repairLinkHtml(label) {
@@ -143,6 +143,18 @@ function mergeAll(local, remote) {
     merged.coachPlan = localOk.coachPlan || remoteOk.coachPlan || null;
   }
   return merged;
+}
+
+function restoreMacBackup() {
+  if (typeof MAC_BACKUP === "undefined") return;
+  save(mergeAll(load(), MAC_BACKUP));
+  ensureReviews();
+  ensureCoachPlan();
+  render();
+}
+
+function needsMacRestore() {
+  return typeof MAC_BACKUP !== "undefined" && !completedWorkouts().some((w) => w.date === "2026-08-17");
 }
 
 function exportBackup() {
@@ -724,6 +736,14 @@ function todayHtml() {
       <div class="stat"><span>タンパク質</span><b>${meal.protein || "—"}</b></div>
       <div class="stat"><span>睡眠</span><b>${sleep.quality ? sleep.hours + "h" : "—"}</b></div>
     </section>
+    ${needsMacRestore()
+      ? `<section class="card accent">
+      <div class="kicker">記録の復元</div>
+      <h2 style="margin-top:8px">8/17 のトレーニングを戻す</h2>
+      <p class="muted">Safariで戻しても、ホーム画面のアプリには別保存です。ここで戻してください。</p>
+      <button class="btn" type="button" data-restore-mac="1">8/17の記録を戻す</button>
+    </section>`
+      : ""}
     ${weekCalendarHtml()}
     <section class="card accent">
       <div class="kicker">自動コーチ · ${phaseLabel()} · ${todayStr().replaceAll("-", ".")} ${weekdayJa(todayStr())}</div>
@@ -1116,7 +1136,7 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>データのバックアップ</h3>
-      <p class="muted">機種変更やURL変更のときに使います。記録はこのiPhone内にあります。</p>
+      <p class="muted">今のアプリは iPhone 単体です。GitHub上の公開ページからは、自宅のMacへ自動同期できません（HTTPSのページからMacのhttp通信が止められるため）。Macに残したいときは下で書き出してください。</p>
       <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
       <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
       <input type="file" accept="application/json,.json" data-import-file="1" hidden />
@@ -1247,7 +1267,7 @@ function bind() {
       render();
     })
   );
-  document.querySelectorAll("[data-export]").forEach((el) => el.addEventListener("click", exportBackup));
+  document.querySelectorAll("[data-restore-mac]").forEach((el) => el.addEventListener("click", restoreMacBackup));
   document.querySelectorAll("[data-import-btn]").forEach((el) =>
     el.addEventListener("click", () => document.querySelector("[data-import-file]")?.click())
   );
@@ -1556,7 +1576,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=21").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=22").catch(() => {});
   });
 }
 
