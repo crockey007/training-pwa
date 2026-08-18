@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 24;
+const APP_VERSION = 25;
 
 const state = {
   view: "today",
@@ -12,6 +12,7 @@ const state = {
   restTimer: null,
   showNextPreview: false,
   reviewing: false,
+  editDraft: null,
 };
 
 let syncTimer = null;
@@ -130,11 +131,82 @@ function mergeAll(local, remote) {
   return merged;
 }
 
+function setsAllWeight(row, kg) {
+  return Boolean(row && row.sets && row.sets.length && row.sets.every((s) => Number(s.weight) === kg));
+}
+
+function correctAugust17Weights() {
+  const data = load();
+  const workouts = data.workouts || [];
+  const w = workouts.find((row) => row.date === "2026-08-17");
+  if (!w) return false;
+  const bench = w.exercises.find((ex) => ex.id === "bench-press");
+  const incline = w.exercises.find((ex) => ex.id === "incline-press");
+  const ohp = w.exercises.find((ex) => ex.id === "ohp");
+  if (!setsAllWeight(bench, 40) || !setsAllWeight(incline, 30) || !setsAllWeight(ohp, 20)) return false;
+  bench.sets.forEach((s) => {
+    s.weight = 30;
+  });
+  incline.sets.forEach((s) => {
+    s.weight = 20;
+  });
+  ohp.sets.forEach((s) => {
+    s.weight = 10;
+  });
+  w.review = CoachEngine.reviewSession(
+    w,
+    workouts.filter((row) => row.date !== w.date)
+  );
+  save({ ...data, workouts, updatedAt: new Date().toISOString() });
+  try {
+    refreshCoachPlan();
+  } catch {
+    /* plan later */
+  }
+  return true;
+}
+
+function cloneWorkout(w) {
+  return JSON.parse(JSON.stringify(w));
+}
+
+function startEditWorkout(date) {
+  const w = completedWorkouts().find((row) => row.date === date);
+  if (!w) return;
+  state.editDraft = cloneWorkout(w);
+  state.historyDate = null;
+  state.sheet = null;
+  state.view = "edit";
+  render();
+}
+
+function saveEditedWorkout() {
+  const edited = state.editDraft;
+  if (!edited) return;
+  const workouts = db().workouts.filter((w) => w.date !== edited.date);
+  edited.completed = true;
+  edited.review = CoachEngine.reviewSession(edited, workouts);
+  workouts.push(edited);
+  patch({ workouts });
+  refreshCoachPlan();
+  state.editDraft = null;
+  state.view = "history";
+  state.historyDate = edited.date;
+  render();
+}
+
+function cancelEditWorkout() {
+  state.editDraft = null;
+  state.view = "history";
+  render();
+}
+
 function restoreMacBackup() {
   if (typeof MAC_BACKUP === "undefined") return;
   save(mergeAll(load(), MAC_BACKUP));
+  correctAugust17Weights();
   ensureReviews();
-  ensureCoachPlan();
+  refreshCoachPlan();
   render();
 }
 
@@ -331,7 +403,7 @@ function recommend(exercise) {
     return {
       weight: exercise.startWeight,
       reps: exercise.repMin,
-      reason: `開始重量の目安です（バー20kgを含む総重量）。最初は${exercise.repMin}回を綺麗に。`,
+      reason: `開始重量の目安です（バー${PROFILE.barKg}kgを含む総重量）。最初は${exercise.repMin}回を綺麗に。`,
     };
   }
   const weight = last.sets[0].weight;
@@ -578,6 +650,7 @@ function render() {
     review: ["振り返り", "完了したセッションの評価"],
     life: ["生活", "食事と睡眠は短く、続ける"],
     library: ["種目", "器具の使い方とフォーム"],
+    edit: ["記録の修正", "重量と回数をあとから直す"],
   };
   const [title, sub] = titles[state.view] || titles.today;
   const syncLabel = {
@@ -615,7 +688,7 @@ function tabbar() {
   return `<nav class="tabbar">${tabs
     .map(
       ([id, label]) =>
-        `<button data-nav="${id}" class="${state.view === id || (id === "workout" && state.view === "history") ? "active" : ""}"><span class="ico">${icon(id)}</span>${label}</button>`
+        `<button data-nav="${id}" class="${state.view === id || (id === "workout" && (state.view === "history" || state.view === "edit")) ? "active" : ""}"><span class="ico">${icon(id)}</span>${label}</button>`
     )
     .join("")}</nav>`;
 }
@@ -630,6 +703,7 @@ function viewHtml() {
   if (state.view === "review") return reviewPageHtml();
   if (state.view === "library") return libraryHtml();
   if (state.view === "life") return lifeHtml();
+  if (state.view === "edit") return editWorkoutHtml();
   return todayHtml();
 }
 
@@ -864,7 +938,7 @@ function workoutHtml() {
         </div>
         <button class="btn small ghost" data-nav="history">履歴</button>
       </div>
-      <p class="muted">${sessionFocus(draft.sessionType)}。休憩はコンパウンド90–120秒、腕は60–90秒。</p>
+      <p class="muted">${sessionFocus(draft.sessionType)}。重量はバー（${PROFILE.barKg}kg）込みの総重量。休憩はコンパウンド90–120秒、腕は60–90秒。</p>
     </section>
     ${draft.exercises
       .map((row) => {
@@ -900,6 +974,56 @@ function workoutHtml() {
     <button class="btn" data-finish="1">このセッションを完了</button>
     <button class="btn ghost" data-clear-draft="1">下書きを破棄</button>
   `;
+}
+
+function editWorkoutHtml() {
+  const draft = state.editDraft;
+  if (!draft) {
+    return `<div class="empty">修正する記録がありません。</div>
+      <button class="btn" data-nav="history">履歴へ</button>`;
+  }
+  const meta = SESSION_META[draft.sessionType] || { name: draft.sessionType };
+  return `
+    <section class="card">
+      <div class="row">
+        <div>
+          <div class="kicker">${draft.sessionType} ${meta.name}</div>
+          <h2>${draft.date.replaceAll("-", ".")} ${weekdayJa(draft.date)}</h2>
+        </div>
+      </div>
+      <p class="muted">重量はバー（${PROFILE.barKg}kg）込みの総重量です。直したら「修正を保存」を押してください。振り返りと次回の提案も更新されます。</p>
+    </section>
+    ${draft.exercises
+      .map((row) => {
+        const ex = EXERCISE_MAP[row.id];
+        return `<section class="card">
+          <div class="row">
+            ${motionThumb(row.id)}
+            <div style="flex:1">
+              <h3>${ex.name}</h3>
+              <div class="muted">${ex.bodyweight ? "自重" : "バー込み総重量"}</div>
+            </div>
+          </div>
+          ${row.sets
+            .map(
+              (set, i) => `<div class="set-row">
+              <div class="muted">#${i + 1}</div>
+              ${
+                ex.bodyweight
+                  ? `<div class="muted" style="text-align:center">自重</div>`
+                  : stepperHtml(`w:${row.id}:${i}`, set.weight, "kg")
+              }
+              ${stepperHtml(`r:${row.id}:${i}`, set.reps, "回")}
+            </div>`
+            )
+            .join("")}
+        </section>`;
+      })
+      .join("")}
+    <button class="btn" data-save-edit="1">修正を保存</button>
+    <button class="btn ghost" data-cancel-edit="1">やめる</button>
+  `;
+}
 }
 
 function stepperHtml(key, value, unit) {
@@ -952,6 +1076,7 @@ function reviewPageHtml() {
       return `<section class="card">
         <div class="kicker">${w.date.replaceAll("-", ".")} ${weekdayJa(w.date)} · ${w.sessionType} ${meta.name}</div>
         ${reviewBlockHtml(w.review, w.date) || `<p class="muted">記録から振り返りを作成しています。</p>`}
+        <button class="btn ghost" type="button" data-edit-workout="${w.date}" style="margin-top:10px">この記録を修正</button>
       </section>`;
     })
     .join("");
@@ -1098,6 +1223,7 @@ function guideBlock(num, title, lines, warn = false) {
 function bind() {
   document.querySelectorAll("[data-nav]").forEach((el) =>
     el.addEventListener("click", () => {
+      if (el.dataset.nav !== "edit") state.editDraft = null;
       state.view = el.dataset.nav;
       if (state.view === "workout") state.draft = db().draft;
       render();
@@ -1169,6 +1295,11 @@ function bind() {
     })
   );
   document.querySelectorAll("[data-restore-mac]").forEach((el) => el.addEventListener("click", restoreMacBackup));
+  document.querySelectorAll("[data-edit-workout]").forEach((el) =>
+    el.addEventListener("click", () => startEditWorkout(el.dataset.editWorkout))
+  );
+  document.querySelectorAll("[data-save-edit]").forEach((el) => el.addEventListener("click", saveEditedWorkout));
+  document.querySelectorAll("[data-cancel-edit]").forEach((el) => el.addEventListener("click", cancelEditWorkout));
   document.querySelectorAll("[data-import-btn]").forEach((el) =>
     el.addEventListener("click", () => document.querySelector("[data-import-file]")?.click())
   );
@@ -1261,7 +1392,8 @@ function historySheetHtml() {
       })
       .join("")}
     ${reviewBlockHtml(w.review, w.date)}
-    <button class="btn" type="button" data-close-btn="1" style="margin-top:16px">閉じる</button>
+    <button class="btn" type="button" data-edit-workout="${w.date}" style="margin-top:16px">記録を修正</button>
+    <button class="btn ghost" type="button" data-close-btn="1" style="margin-top:8px">閉じる</button>
   </div></div>`;
 }
 
@@ -1293,7 +1425,7 @@ function applyStep(key, delta) {
     return;
   }
   const [kind, id, index] = key.split(":");
-  const draft = state.draft || db().draft;
+  const draft = state.editDraft || state.draft || db().draft;
   if (!draft) return;
   const row = draft.exercises.find((ex) => ex.id === id);
   const exercise = EXERCISE_MAP[id];
@@ -1303,6 +1435,11 @@ function applyStep(key, delta) {
     set.weight = Math.max(0, roundStep(set.weight + delta * step, step));
   } else {
     set.reps = Math.max(0, set.reps + delta);
+  }
+  if (state.editDraft) {
+    state.editDraft = draft;
+    render();
+    return;
   }
   state.draft = draft;
   patch({ draft });
@@ -1384,6 +1521,11 @@ async function onAppVisible() {
 function bootstrap() {
   state.coachPlan = load().coachPlan || null;
   try {
+    correctAugust17Weights();
+  } catch (err) {
+    console.error(err);
+  }
+  try {
     ensureCoachPlan();
   } catch (err) {
     console.error(err);
@@ -1402,7 +1544,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=24").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=25").catch(() => {});
   });
 }
 

@@ -4,6 +4,7 @@ const PROFILE = {
   startBodyFat: 18,
   proteinTargetG: 130,
   startDate: "2026-08-17",
+  barKg: 10,
   weeklyTrainingMin: 2,
   weeklyTrainingMax: 3,
 };
@@ -43,7 +44,7 @@ const EXERCISES = [
       "ベンチをラックの中央に置き、フラット（水平）にする。",
       "Jカップは、バーを外したとき肘が軽く曲がる高さにする。高すぎると肩に負担がかかる。",
       "セーフティバーは、バーが胸に触れる位置より少し下にセットする。潰れたときの命綱。",
-      "バー（20kg）にプレートを左右均等に付け、必ずカラーで固定する。",
+      "バー（10kg）にプレートを左右均等に付け、必ずカラーで固定する。記録する重量はバー込みの総重量。",
       "目がバーのやや手前に来る位置に寝て、肩甲骨を寄せて胸を張る。足は床にしっかりつける。",
     ],
     form: [
@@ -69,7 +70,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 25,
+    startWeight: 20,
     restSec: 120,
     setup: [
       "ベンチの角度は30〜45度。60度以上だと肩プレスに近くなる。",
@@ -98,7 +99,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 20,
+    startWeight: 10,
     restSec: 120,
     setup: [
       "Jカップを鎖骨〜肩の高さにセット。立ってバーを受け取れる位置。",
