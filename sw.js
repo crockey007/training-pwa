@@ -1,4 +1,4 @@
-const CACHE = "home-gym-v30";
+const CACHE = "home-gym-v31";
 const SHELL = [
   "./",
   "./index.html",

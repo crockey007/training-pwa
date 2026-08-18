@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 30;
+const APP_VERSION = 31;
 
 const state = {
   view: "today",
@@ -14,6 +14,7 @@ const state = {
   reviewing: false,
   editDraft: null,
   runDate: null,
+  runNotice: "",
 };
 
 let syncTimer = null;
@@ -80,7 +81,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=30" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html?v=31" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -680,7 +681,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=30" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html?v=31" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -747,6 +748,7 @@ function todayHtml() {
       : ""}
     ${weekCalendarHtml()}
     ${runCardHtml(todayStr())}
+    ${weekRunsHtml()}
     <section class="card accent">
       <div class="kicker">自動コーチ · ${phaseLabel()} · ${todayStr().replaceAll("-", ".")} ${weekdayJa(todayStr())}</div>
       <h2 style="margin-top:8px">${escapeHtml(sug.title)}</h2>
@@ -929,7 +931,7 @@ function runCardHtml(date) {
         <div class="kicker">ラン · Garmin</div>
         <h3>${isToday ? "今日のラン" : date.replaceAll("-", ".") + " のラン"}</h3>
       </div>
-      <span class="muted">${run.done ? "記録済" : "未記録"}</span>
+      <span class="muted">${run.done && (run.km || run.kcal) ? `${run.km || 0}km · ${run.kcal || 0}kcal` : run.done ? "数字を入れて保存" : "未記録"}</span>
     </div>
     <p class="muted">走った日は「ランした」を選んで、Garminの距離と消費カロリーを入れてください。</p>
     <div class="pills" style="margin-top:10px">
@@ -951,6 +953,7 @@ function runCardHtml(date) {
         </div>
       </div>
       <p class="muted" style="margin-top:8px">±でも、Garminの数字を直接入力しても大丈夫です。</p>
+      ${state.runNotice ? `<p class="coach-note" style="margin-top:10px">${escapeHtml(state.runNotice)}</p>` : ""}
       <button class="btn" type="button" data-save-run="${date}" style="margin-top:12px">ランを保存</button>`
         : ""
     }
@@ -964,6 +967,26 @@ function runSheetHtml() {
     <div class="handle"></div>
     <div style="margin-top:36px">${runCardHtml(state.runDate)}</div>
   </div></div>`;
+}
+
+function weekRunsHtml() {
+  const start = weekStart();
+  const runs = (db().runs || [])
+    .filter((r) => r.done && r.date >= start && (r.km || r.kcal))
+    .sort((a, b) => b.date.localeCompare(a.date));
+  if (!runs.length) return "";
+  return `<section class="card">
+    <h3>今週のラン</h3>
+    ${runs
+      .map(
+        (r) => `<div class="body-log-row">
+        <span>${r.date.replaceAll("-", ".")} ${weekdayJa(r.date)}</span>
+        <span>${r.km || 0}km</span>
+        <span>${r.kcal || 0}kcal</span>
+      </div>`
+      )
+      .join("")}
+  </section>`;
 }
 
 function restTimerBar() {
@@ -1208,7 +1231,6 @@ function lifeHtml() {
           .join("")}
       </div>
     </section>
-    ${runCardHtml(todayStr())}
     <section class="card">
       <div class="row"><h3>今日のタンパク質</h3><b>${meal.protein || 0}g</b></div>
       <div class="progress-bar" style="margin:10px 0 12px"><span style="width:${Math.min(100, ((meal.protein || 0) / PROFILE.proteinTargetG) * 100)}%"></span></div>
@@ -1435,12 +1457,18 @@ function bind() {
   document.querySelectorAll("[data-save-run]").forEach((el) =>
     el.addEventListener("click", () => {
       const date = el.dataset.saveRun;
-      const kmEl = document.querySelector(`[data-run-km="${date}"]`);
-      const kcalEl = document.querySelector(`[data-run-kcal="${date}"]`);
+      const root = el.closest("section") || document;
+      const kmEl = root.querySelector("[data-run-km]");
+      const kcalEl = root.querySelector("[data-run-kcal]");
       const km = kmEl ? Math.max(0, Number(String(kmEl.value).replace(",", ".")) || 0) : 0;
       const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : 0;
       upsertByDate("runs", { date, done: true, km: roundStep(km, 0.01), kcal });
       refreshCoachPlan();
+      state.runNotice = km || kcal ? `保存しました ${km || 0}km · ${kcal || 0}kcal` : "距離かカロリーを入れてから保存してください";
+      if (state.runDate) {
+        closeOverlay();
+        return;
+      }
       render();
     })
   );
@@ -1724,7 +1752,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=30").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
   });
 }
 
