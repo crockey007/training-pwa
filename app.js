@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 32;
+const APP_VERSION = 33;
 
 const state = {
   view: "today",
@@ -81,7 +81,7 @@ function repairUrl() {
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html?v=32" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -681,7 +681,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html?v=32" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -1266,8 +1266,8 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
-      <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。</p>
-      <button class="btn" type="button" data-force-update="1" style="margin-top:12px">最新版に更新する</button>
+      <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。上の版番号（v30など）を押しても更新できます。</p>
+      <a class="btn" href="./update.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
     </section>
   `;
 }
@@ -1678,7 +1678,7 @@ async function forceAppRefresh() {
     /* ignore */
   }
   const dest = new URL("./index.html", location.href);
-  dest.searchParams.set("v", String(APP_VERSION));
+  dest.search = "";
   dest.searchParams.set("t", String(Date.now()));
   location.href = dest.href;
 }
@@ -1752,7 +1752,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=32").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
 }
 
