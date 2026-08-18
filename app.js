@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 
 const state = {
   view: "today",
@@ -589,7 +589,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · v${APP_VERSION}</div>
+      <div class="sub">${sub} · <a href="./update.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -1049,7 +1049,8 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
-      <p class="muted">白い画面・更新が反映されないときはこちら</p>
+      <p class="muted">画面が v22 のまま、白い画面、更新されないときはこちら。ホーム画面のアプリから開いてください。</p>
+      <a class="btn" href="./update.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
       <p style="margin-top:10px">${repairLinkHtml()}</p>
     </section>
   `;
@@ -1401,7 +1402,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=23").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=24").catch(() => {});
   });
 }
 
