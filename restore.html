@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>記録を戻す</title>
+  <style>
+    body { margin:0; background:#0b0d10; color:#f3f5f7; font-family:-apple-system,"Hiragino Sans",sans-serif; padding:28px 22px; }
+    main { max-width:420px; margin:0 auto; }
+    p { color:#8b95a5; line-height:1.6; }
+    button { width:100%; border:0; border-radius:14px; padding:16px; background:#e53935; color:#fff; font-size:17px; font-weight:800; margin-top:16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>昨日の記録を戻す</h1>
+    <p>8/17 のセッションA（ベンチ40kg×10 など）を、このiPhoneのアプリに書き戻します。</p>
+    <button type="button" id="go">記録を戻す</button>
+    <p id="msg"></p>
+  </main>
+  <script>
+    const KEY = "home-gym-v1";
+    const SNAPSHOT = {"workouts": [{"date": "2026-08-17", "sessionType": "A", "exercises": [{"id": "bench-press", "sets": [{"weight": 40, "reps": 10}, {"weight": 40, "reps": 10}, {"weight": 40, "reps": 10}]}, {"id": "incline-press", "sets": [{"weight": 30, "reps": 8}, {"weight": 30, "reps": 8}, {"weight": 30, "reps": 8}]}, {"id": "ohp", "sets": [{"weight": 20, "reps": 8}, {"weight": 20, "reps": 8}, {"weight": 20, "reps": 8}]}, {"id": "pushdown", "sets": [{"weight": 10, "reps": 10}, {"weight": 10, "reps": 10}, {"weight": 10, "reps": 10}]}, {"id": "bench-dip", "sets": [{"weight": 0, "reps": 10}, {"weight": 0, "reps": 10}]}], "completed": true, "review": {"summary": "2026/08/17 のA（押す）を完了。総ボリューム約2700kg。", "goods": "上限到達の種目はまだ少ないので、同じ重量で回数を積みましょう。", "improves": "大きく崩れた種目はありません。", "vsPrev": "この種目グループの前回比較データはまだありません。", "next": "次回は B 引く。今日はタンパク質と睡眠を優先。", "logLines": ["ベンチプレス: 40kg×10 / 40kg×10 / 40kg×10", "インクライン・ベンチプレス: 30kg×8 / 30kg×8 / 30kg×8", "オーバーヘッドプレス: 20kg×8 / 20kg×8 / 20kg×8", "ケーブル・プッシュダウン: 10kg×10 / 10kg×10 / 10kg×10", "ベンチディップ: 10回 / 10回"], "source": "local", "generatedAt": "2026-08-17T13:41:33.875Z"}}], "meals": [{"date": "2026-08-17", "protein": 60, "quality": "", "note": ""}], "sleeps": [{"date": "2026-08-17", "hours": 7, "quality": "good", "note": ""}], "weights": [{"date": "2026-08-17", "kg": 68.9, "bodyFat": 18.9}], "draft": null, "profileStartDate": "2026-08-17"};
+    function mergeByDate(a, b) {
+      const map = new Map();
+      [...(a || []), ...(b || [])].forEach((row) => {
+        const existing = map.get(row.date);
+        map.set(row.date, existing ? { ...existing, ...row } : row);
+      });
+      return [...map.values()].sort((x, y) => x.date.localeCompare(y.date));
+    }
+    function mergeWorkouts(a, b) {
+      const map = new Map();
+      [...(a || []), ...(b || [])].forEach((w) => {
+        const existing = map.get(w.date);
+        if (!existing) map.set(w.date, w);
+        else if (w.completed && !existing.completed) map.set(w.date, w);
+        else if ((w.exercises || []).length >= (existing.exercises || []).length) map.set(w.date, { ...existing, ...w });
+      });
+      return [...map.values()].sort((x, y) => x.date.localeCompare(y.date));
+    }
+    function restore() {
+      let local = {};
+      try { local = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) {}
+      const next = {
+        workouts: mergeWorkouts(local.workouts, SNAPSHOT.workouts),
+        meals: mergeByDate(local.meals, SNAPSHOT.meals),
+        sleeps: mergeByDate(local.sleeps, SNAPSHOT.sleeps),
+        weights: mergeByDate(local.weights, SNAPSHOT.weights),
+        draft: local.draft || null,
+        profileStartDate: local.profileStartDate || SNAPSHOT.profileStartDate,
+        updatedAt: new Date().toISOString(),
+        pendingSync: false
+      };
+      localStorage.setItem(KEY, JSON.stringify(next));
+      document.getElementById("msg").textContent = "戻しました。アプリを開きます。";
+      location.replace("./index.html?restored=1");
+    }
+    document.getElementById("go").addEventListener("click", restore);
+  </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 
 const state = {
   view: "today",
@@ -143,6 +143,33 @@ function mergeAll(local, remote) {
     merged.coachPlan = localOk.coachPlan || remoteOk.coachPlan || null;
   }
   return merged;
+}
+
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `training-${todayStr()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function importBackupFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const incoming = JSON.parse(String(reader.result || "{}"));
+      if (!incoming || typeof incoming !== "object") throw new Error("invalid");
+      save(mergeAll(load(), incoming));
+      ensureReviews();
+      ensureCoachPlan();
+      render();
+    } catch {
+      alert("読み込めませんでした。");
+    }
+  };
+  reader.readAsText(file);
 }
 
 async function syncPull() {
@@ -1088,6 +1115,13 @@ function lifeHtml() {
       </div>
     </section>
     <section class="card">
+      <h3>データのバックアップ</h3>
+      <p class="muted">機種変更やURL変更のときに使います。記録はこのiPhone内にあります。</p>
+      <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
+      <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
+      <input type="file" accept="application/json,.json" data-import-file="1" hidden />
+    </section>
+    <section class="card">
       <h3>アプリの修復</h3>
       <p class="muted">白い画面・更新が反映されないときはこちら</p>
       <p style="margin-top:10px">${repairLinkHtml()}</p>
@@ -1211,6 +1245,16 @@ function bind() {
     el.addEventListener("click", () => {
       saveTodayBody();
       render();
+    })
+  );
+  document.querySelectorAll("[data-export]").forEach((el) => el.addEventListener("click", exportBackup));
+  document.querySelectorAll("[data-import-btn]").forEach((el) =>
+    el.addEventListener("click", () => document.querySelector("[data-import-file]")?.click())
+  );
+  document.querySelectorAll("[data-import-file]").forEach((el) =>
+    el.addEventListener("change", () => {
+      const file = el.files && el.files[0];
+      if (file) importBackupFile(file);
     })
   );
   document.querySelectorAll("[data-meal-note]").forEach((el) =>
@@ -1512,7 +1556,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=20").catch(() => {});
+    navigator.serviceWorker.register("./sw.js?v=21").catch(() => {});
   });
 }
 
