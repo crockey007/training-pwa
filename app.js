@@ -1,0 +1,1519 @@
+const KEY = "home-gym-v1";
+const APP_VERSION = 20;
+
+const state = {
+  view: "today",
+  sheet: null,
+  historyDate: null,
+  draft: null,
+  weeklyPlan: null,
+  coachPlan: null,
+  syncStatus: "idle",
+  restTimer: null,
+  showNextPreview: false,
+  reviewing: false,
+};
+
+let syncTimer = null;
+
+function todayStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseDate(value) {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function weekdayJa(value) {
+  return "日月火水木金土"[parseDate(value).getDay()];
+}
+
+function weekStart(value = todayStr()) {
+  const date = parseDate(value);
+  const day = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - day);
+  return todayStr(date);
+}
+
+function load() {
+  try {
+    const data = JSON.parse(localStorage.getItem(KEY)) || {};
+    if (!data.updatedAt) data.updatedAt = null;
+    return data;
+  } catch {
+    return {};
+  }
+}
+
+function save(data) {
+  localStorage.setItem(KEY, JSON.stringify(data));
+}
+
+function canSync() {
+  if (!location.protocol.startsWith("http")) return false;
+  const host = location.hostname;
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) return true;
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
+function withTimeout(promise, ms = 5000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
+function showBootError(err) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  const msg = err && err.message ? String(err.message) : "不明なエラー";
+  app.innerHTML = `<main class="page"><section class="card"><h2>起動エラー</h2><p class="muted">${escapeHtml(msg)}</p><p class="muted">${repairLinkHtml()}</p></section></main>`;
+}
+
+function repairUrl() {
+  return `${location.origin}/update.html`;
+}
+
+function repairLinkHtml(label) {
+  const url = repairUrl();
+  const text = label || url;
+  return `<a href="./update.html" class="link-url">${escapeHtml(text)}</a>`;
+}
+
+function scheduleSync() {
+  if (!canSync()) {
+    state.syncStatus = "offline";
+    return;
+  }
+  state.syncStatus = "pending";
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncPush(), 800);
+}
+
+function mergeByDate(listA = [], listB = [], key = "date") {
+  const map = new Map();
+  [...listA, ...listB].forEach((row) => {
+    const existing = map.get(row[key]);
+    if (!existing) map.set(row[key], row);
+    else map.set(row[key], { ...existing, ...row });
+  });
+  return [...map.values()].sort((a, b) => a[key].localeCompare(b[key]));
+}
+
+function mergeWorkouts(a = [], b = []) {
+  const map = new Map();
+  [...a, ...b].forEach((w) => {
+    const existing = map.get(w.date);
+    if (!existing) map.set(w.date, w);
+    else if (w.completed && !existing.completed) map.set(w.date, w);
+    else if ((w.exercises?.length || 0) > (existing.exercises?.length || 0)) map.set(w.date, w);
+    else if (w.review && (!existing.review || (w.review.generatedAt || "") >= (existing.review.generatedAt || ""))) {
+      map.set(w.date, { ...existing, ...w });
+    }
+  });
+  return [...map.values()].sort((x, y) => x.date.localeCompare(y.date));
+}
+
+function mergeAll(local, remote) {
+  const localOk = local && typeof local === "object" ? local : {};
+  const remoteOk = remote && typeof remote === "object" ? remote : {};
+  const merged = {
+    workouts: mergeWorkouts(localOk.workouts, remoteOk.workouts),
+    meals: mergeByDate(localOk.meals, remoteOk.meals),
+    sleeps: mergeByDate(localOk.sleeps, remoteOk.sleeps),
+    weights: mergeByDate(localOk.weights, remoteOk.weights),
+    draft: localOk.draft && localOk.draft.date === todayStr() ? localOk.draft : remoteOk.draft ?? localOk.draft,
+    profileStartDate: localOk.profileStartDate || remoteOk.profileStartDate || PROFILE.startDate,
+    pendingSync: false,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    merged.coachPlan = CoachEngine.generate(merged);
+  } catch {
+    merged.coachPlan = localOk.coachPlan || remoteOk.coachPlan || null;
+  }
+  return merged;
+}
+
+async function syncPull() {
+  if (!canSync()) {
+    state.syncStatus = "offline";
+    return false;
+  }
+  try {
+    const res = await withTimeout(fetch("/api/sync", { cache: "no-store" }), 5000);
+    if (!res.ok) throw new Error("pull failed");
+    const remote = await res.json();
+    const local = load();
+    const hasLocalOnly =
+      (local.workouts?.length || 0) > (remote.workouts?.length || 0) ||
+      Boolean(local.pendingSync) ||
+      (local.updatedAt && remote.updatedAt && local.updatedAt > remote.updatedAt);
+    if (hasLocalOnly || !remote.updatedAt) {
+      const merged = mergeAll(local, remote);
+      save(merged);
+      state.coachPlan = merged.coachPlan;
+      await syncPush(true);
+    } else {
+      const merged = mergeAll(local, remote);
+      save(merged);
+      state.coachPlan = merged.coachPlan;
+    }
+    state.syncStatus = "synced";
+    return true;
+  } catch {
+    state.syncStatus = "offline";
+    return false;
+  }
+}
+
+async function syncPush(silent = false) {
+  if (!canSync()) {
+    state.syncStatus = "offline";
+    return;
+  }
+  try {
+    const payload = { ...load(), updatedAt: new Date().toISOString(), device: "iphone" };
+    save(payload);
+    const res = await withTimeout(
+      fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+      5000
+    );
+    if (!res.ok) throw new Error("push failed");
+    save({ ...load(), pendingSync: false });
+    state.syncStatus = "synced";
+    if (!silent) render();
+  } catch {
+    state.syncStatus = "offline";
+    if (!silent) render();
+  }
+}
+
+async function loadCoachPlan() {
+  const local = load().coachPlan;
+  if (local) state.coachPlan = local;
+  if (!canSync()) return;
+  try {
+    const res = await withTimeout(fetch("/api/plan", { cache: "no-store" }), 5000);
+    if (res.ok) {
+      const remote = await res.json();
+      if (!local?.generatedAt || remote.generatedAt > local.generatedAt) {
+        state.coachPlan = remote;
+        save({ ...load(), coachPlan: remote });
+      }
+    }
+  } catch {
+    /* local plan */
+  }
+}
+
+function applyCoachPlan(plan) {
+  state.coachPlan = plan;
+  patch({ coachPlan: plan });
+}
+
+function refreshCoachPlan(completedWorkout) {
+  const data = load();
+  if (!data.profileStartDate) data.profileStartDate = PROFILE.startDate;
+  if (completedWorkout) {
+    data.workouts = mergeWorkouts(data.workouts || [], [completedWorkout]);
+  }
+  try {
+    const plan = CoachEngine.generate(data);
+    applyCoachPlan(plan);
+    return plan;
+  } catch (err) {
+    console.error(err);
+    return data.coachPlan || null;
+  }
+}
+
+function ensureCoachPlan() {
+  try {
+    const data = load();
+    const all = completedWorkouts();
+    const last = all.length ? all[all.length - 1] : null;
+    const plan = data.coachPlan;
+    const weekOf = weekStart();
+    const needsWeekly = !plan || !plan.weeklyPlan || plan.weekOf !== weekOf;
+    const needsMicro = last && plan && plan.basedOnDate !== last.date;
+    if (!plan || needsWeekly || needsMicro) {
+      return refreshCoachPlan();
+    }
+    state.coachPlan = plan;
+    return plan;
+  } catch (err) {
+    console.error(err);
+    return state.coachPlan || null;
+  }
+}
+
+function db() {
+  const data = load();
+  return {
+    workouts: data.workouts || [],
+    meals: data.meals || [],
+    sleeps: data.sleeps || [],
+    weights: data.weights || [],
+    draft: data.draft || null,
+    coachPlan: data.coachPlan || null,
+  };
+}
+
+function patch(partial) {
+  const next = { ...load(), ...partial, updatedAt: new Date().toISOString(), pendingSync: true };
+  save(next);
+  scheduleSync();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function completedWorkouts() {
+  return db().workouts.filter((w) => w.completed).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function lastWorkout() {
+  const all = completedWorkouts();
+  return all[all.length - 1] || null;
+}
+
+function ensureReviews() {
+  const workouts = db().workouts || [];
+  let changed = false;
+  const next = workouts.map((w) => {
+    if (!w.completed || w.review) return w;
+    changed = true;
+    return { ...w, review: CoachEngine.reviewSession(w, workouts) };
+  });
+  if (changed) patch({ workouts: next });
+}
+
+function workoutsThisWeek() {
+  const start = weekStart();
+  return completedWorkouts().filter((w) => w.date >= start);
+}
+
+function lastLogs(exerciseId) {
+  for (const workout of completedWorkouts().slice().reverse()) {
+    const found = workout.exercises.find((ex) => ex.id === exerciseId);
+    if (found && found.sets.some((set) => set.reps > 0)) return found;
+  }
+  return null;
+}
+
+function phaseLabel() {
+  return state.coachPlan?.phase || (completedWorkouts().length < 6 ? "導入期" : "漸進期");
+}
+
+function weakerBetween(a, b) {
+  const logA = lastLogs(a);
+  const logB = lastLogs(b);
+  if (!logA) return a;
+  if (!logB) return b;
+  const avg = (log) => log.sets.reduce((sum, set) => sum + set.reps, 0) / log.sets.length;
+  return avg(logA) <= avg(logB) ? a : b;
+}
+
+function pickBack() {
+  const pull = lastLogs("pull-up");
+  if (pull && pull.sets.some((set) => set.reps >= 6)) return "pull-up";
+  return "lat-pulldown";
+}
+
+function nextSessionType() {
+  return state.coachPlan?.nextSessionType || (() => {
+    const last = lastWorkout();
+    if (!last) return "A";
+    return { A: "B", B: "C", C: "A" }[last.sessionType] || "A";
+  })();
+}
+
+function sessionExercises(type) {
+  const plan = state.coachPlan;
+  if (plan && plan.nextSessionType === type && plan.exercises?.length) return plan.exercises;
+  if (type === "A") return ["bench-press", "incline-press", "ohp", "pushdown", "bench-dip"];
+  if (type === "B") return ["lat-pulldown", "seated-row", "barbell-row", "barbell-curl", "face-pull"];
+  return [weakerBetween("bench-press", "incline-press"), pickBack(), "side-raise", "oh-tricep", "hammer-curl", "core"];
+}
+
+function sessionFocus(type) {
+  return state.coachPlan?.focus && state.coachPlan.nextSessionType === type
+    ? state.coachPlan.focus
+    : SESSION_META[type].focus;
+}
+
+function recommend(exercise) {
+  const planned = state.coachPlan?.targets?.[exercise.id];
+  if (planned && state.coachPlan.nextSessionType === (state.draft?.sessionType || nextSessionType())) {
+    return planned;
+  }
+  const last = lastLogs(exercise.id);
+  if (exercise.bodyweight) {
+    if (!last) {
+      return { weight: 0, reps: exercise.repMin, reason: "自重から開始。回数を伸ばすことが進歩です。" };
+    }
+    const hit = last.sets.every((set) => set.reps >= exercise.repMax);
+    return {
+      weight: 0,
+      reps: hit ? exercise.repMax : Math.min(exercise.repMax, Math.max(...last.sets.map((s) => s.reps)) + 1),
+      reason: hit ? "前回は上限回数に到達。今日はさらに1〜2回、または動作を丁寧に。" : "前回の回数をベースに、上限まで伸ばす。",
+    };
+  }
+  if (!last) {
+    return {
+      weight: exercise.startWeight,
+      reps: exercise.repMin,
+      reason: `開始重量の目安です（バー20kgを含む総重量）。最初は${exercise.repMin}回を綺麗に。`,
+    };
+  }
+  const weight = last.sets[0].weight;
+  const hitMax = last.sets.every((set) => set.reps >= exercise.repMax);
+  const missMin = last.sets.some((set) => set.reps < exercise.repMin);
+  if (hitMax) {
+    return {
+      weight: roundStep(weight + exercise.incrementKg, exercise.incrementKg || 2.5),
+      reps: exercise.repMin,
+      reason: `前回すべて${exercise.repMax}回できたので、${exercise.incrementKg}kg上げます。`,
+    };
+  }
+  if (missMin) {
+    return {
+      weight,
+      reps: exercise.repMin,
+      reason: `前回${exercise.repMin}回未満のセットがあったので、同じ重量で回数を伸ばします。`,
+    };
+  }
+  return {
+    weight,
+    reps: Math.min(exercise.repMax, Math.max(...last.sets.map((s) => s.reps))),
+    reason: "前回の重量を維持。回数を上限に近づけましょう。",
+  };
+}
+
+function roundStep(value, step) {
+  const s = step || 2.5;
+  const rounded = Math.round(value / s) * s;
+  return Number(rounded.toFixed(s < 1 ? 2 : 1));
+}
+
+function emptySets(exercise, rec) {
+  return Array.from({ length: exercise.sets }, () => ({
+    weight: rec.weight,
+    reps: rec.reps,
+  }));
+}
+
+function ensureDraft(sessionType) {
+  const data = db();
+  const today = todayStr();
+  if (data.draft && data.draft.date === today && data.draft.sessionType === sessionType) {
+    state.draft = data.draft;
+    return data.draft;
+  }
+  const exercises = sessionExercises(sessionType).map((id) => {
+    const exercise = EXERCISE_MAP[id];
+    const rec = recommend(exercise);
+    return { id, sets: emptySets(exercise, rec) };
+  });
+  const draft = { date: today, sessionType, exercises };
+  state.draft = draft;
+  patch({ draft });
+  return draft;
+}
+
+function todayMeal() {
+  return db().meals.find((m) => m.date === todayStr()) || { date: todayStr(), protein: 0, quality: "", note: "" };
+}
+
+function todaySleep() {
+  return db().sleeps.find((s) => s.date === todayStr()) || { date: todayStr(), hours: 7, quality: "", note: "" };
+}
+
+function sortedBodyLogs() {
+  return db().weights.slice().sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function latestBodyLog() {
+  const logs = sortedBodyLogs();
+  return logs[logs.length - 1] || null;
+}
+
+function todayBody() {
+  const today = todayStr();
+  const found = db().weights.find((w) => w.date === today);
+  const latest = latestBodyLog();
+  return {
+    date: today,
+    kg: found?.kg ?? latest?.kg ?? PROFILE.startWeightKg,
+    bodyFat: found?.bodyFat ?? latest?.bodyFat ?? PROFILE.startBodyFat,
+    saved: Boolean(found),
+  };
+}
+
+function chartSeries(key) {
+  const logs = sortedBodyLogs().filter((row) => row[key] != null);
+  const series = [{ date: "開始", [key]: PROFILE[key === "kg" ? "startWeightKg" : "startBodyFat"], baseline: true }];
+  logs.forEach((row) => series.push(row));
+  return series;
+}
+
+function lineChartSvg(series, key, color, unit) {
+  const points = series.filter((row) => row[key] != null);
+  if (points.length < 2) {
+    return `<div class="chart-empty">記録が2件以上でグラフが表示されます</div>`;
+  }
+  const W = 320;
+  const H = 132;
+  const pad = { t: 12, r: 10, b: 24, l: 34 };
+  const values = points.map((p) => p[key]);
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const span = rawMax - rawMin || 1;
+  const min = rawMin - span * 0.12;
+  const max = rawMax + span * 0.12;
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+  const coords = points.map((p, i) => {
+    const x = pad.l + (i / (points.length - 1)) * innerW;
+    const y = pad.t + innerH - ((p[key] - min) / (max - min)) * innerH;
+    return { x, y, p };
+  });
+  const poly = coords.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(" ");
+  const area = `${coords[0].x.toFixed(1)},${(pad.t + innerH).toFixed(1)} ${poly} ${coords[coords.length - 1].x.toFixed(1)},${(pad.t + innerH).toFixed(1)}`;
+  const yTicks = [min, (min + max) / 2, max];
+  const last = points[points.length - 1];
+  const delta = points.length >= 2 ? last[key] - points[points.length - 2][key] : 0;
+  const deltaLabel = delta === 0 ? "±0" : `${delta > 0 ? "+" : ""}${key === "kg" ? delta.toFixed(1) : delta.toFixed(1)}${unit}`;
+  const deltaClass = delta > 0 ? "up" : delta < 0 ? "down" : "";
+  return `<div class="chart-head">
+      <div><span class="chart-value">${last[key]}${unit}</span><span class="chart-delta ${deltaClass}">${deltaLabel}</span></div>
+      <span class="muted">${points.length - 1}件の記録</span>
+    </div>
+    <svg class="chart-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${key === "kg" ? "体重" : "体脂肪率"}の推移">
+      ${yTicks
+        .map((v) => {
+          const y = pad.t + innerH - ((v - min) / (max - min)) * innerH;
+          return `<line class="chart-grid" x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" />
+            <text class="chart-axis" x="${pad.l - 6}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle">${v.toFixed(key === "kg" ? 1 : 1)}</text>`;
+        })
+        .join("")}
+      <polygon class="chart-area" points="${area}" fill="${color}" />
+      <polyline class="chart-line" points="${poly}" stroke="${color}" />
+      ${coords
+        .map(
+          (c, i) => `<circle class="chart-dot" cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="${i === coords.length - 1 ? 4 : 3}" fill="${color}" />
+            <text class="chart-label" x="${c.x.toFixed(1)}" y="${H - 4}" text-anchor="middle">${c.p.baseline ? "開始" : c.p.date.slice(5).replace("-", "/")}</text>`
+        )
+        .join("")}
+    </svg>`;
+}
+
+function bodyHistoryHtml() {
+  const logs = sortedBodyLogs().slice().reverse();
+  if (!logs.length) return `<p class="muted">まだ記録がありません。</p>`;
+  return logs
+    .slice(0, 8)
+    .map(
+      (row) => `<div class="body-log-row">
+        <span>${row.date.replaceAll("-", ".")}</span>
+        <span>${row.kg != null ? row.kg + "kg" : "—"}</span>
+        <span>${row.bodyFat != null ? row.bodyFat + "%" : "—"}</span>
+      </div>`
+    )
+    .join("");
+}
+
+function upsertByDate(listName, item) {
+  const data = db();
+  const list = data[listName].filter((row) => row.date !== item.date);
+  list.push(item);
+  patch({ [listName]: list });
+}
+
+function suggestion() {
+  const today = todayStr();
+  const plan = state.coachPlan || ensureCoachPlan();
+  const doneToday = completedWorkouts().find((w) => w.date === today);
+  if (doneToday) {
+    const next = plan.weekSchedule?.nextSessionType || plan.nextSessionType;
+    const meta = SESSION_META[next];
+    const when = plan.weekSchedule?.nextDate
+      ? `${plan.weekSchedule.nextDate.replaceAll("-", "/").slice(5)}（${weekdayJa(plan.weekSchedule.nextDate)}）`
+      : "次の空き日";
+    return {
+      type: next,
+      title: `今日の${doneToday.sessionType}は完了`,
+      detail: `${plan.coachNote}\n\n次回予定: ${when} ${next} ${meta.name}（${meta.subtitle}）`,
+      action: "次回メニューを見る",
+      done: true,
+      showNext: true,
+    };
+  }
+  if (db().draft && db().draft.date === today) {
+    const type = db().draft.sessionType;
+    const meta = SESSION_META[type];
+    return {
+      type,
+      title: `${type} ${meta.name} を再開`,
+      detail: "途中の記録が残っています。",
+      action: "トレーニングを再開",
+      resume: true,
+    };
+  }
+  const weekly = workoutsThisWeek();
+  if (weekly.length >= PROFILE.weeklyTrainingMax) {
+    const type = nextSessionType();
+    return {
+      type,
+      title: "今週の目標回数に到達",
+      detail: `上半身は週${PROFILE.weeklyTrainingMin}–${PROFILE.weeklyTrainingMax}回が目安です（${weekly.length}回済）。休養かランを優先してOK。`,
+      action: `${type}を始める`,
+      rest: true,
+    };
+  }
+  const last = lastWorkout();
+  if (last && last.date === yesterdayStr()) {
+    const type = nextSessionType();
+    const meta = SESSION_META[type];
+    return {
+      type,
+      title: `回復日推奨 / 次は${type} ${meta.name}`,
+      detail: "昨日トレーニングしています。可能ならランか休養。やるなら次のセッションです。",
+      action: `${type} ${meta.name} を開始`,
+    };
+  }
+  const type = nextSessionType();
+  const meta = SESSION_META[type];
+  const detail = [plan.coachNote, plan.recoveryNote].filter(Boolean).join("\n\n");
+  return {
+    type,
+    title: `次回: ${type} ${meta.name}`,
+    detail,
+    action: `${type} ${meta.name} を開始`,
+  };
+}
+
+function yesterdayStr() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return todayStr(date);
+}
+
+function render() {
+  const app = document.getElementById("app");
+  if (!app) return;
+  try {
+    const titles = {
+    today: ["Training", "週間カレンダー / 上半身メイン"],
+    workout: ["トレーニング", SESSION_META[state.draft?.sessionType || "A"].subtitle],
+    history: ["履歴", "重量と回数の積み上げ"],
+    review: ["振り返り", "完了したセッションの評価"],
+    life: ["生活", "食事と睡眠は短く、続ける"],
+    library: ["種目", "器具の使い方とフォーム"],
+  };
+  const [title, sub] = titles[state.view] || titles.today;
+  const syncLabel = {
+    synced: load().pendingSync ? "同期待ち" : "Mac同期済",
+    pending: "同期中…",
+    offline: load().pendingSync ? "同期待ち（オフライン）" : "オフライン",
+    idle: "—",
+  }[state.syncStatus];
+  app.innerHTML = `
+    <header class="topbar">
+      <h1>${title}</h1>
+      <div class="sub">${sub} · v${APP_VERSION}</div>
+      ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
+    </header>
+    <main class="page">${viewHtml()}</main>
+    ${tabbar()}
+    ${state.sheet ? sheetHtml() : ""}${state.historyDate ? historySheetHtml() : ""}${nextPreviewHtml()}
+    ${restTimerBar()}
+  `;
+    bind();
+  } catch (err) {
+    console.error(err);
+    showBootError(err);
+  }
+}
+
+function tabbar() {
+  const tabs = [
+    ["today", "今日"],
+    ["workout", "記録"],
+    ["review", "振り返り"],
+    ["library", "種目"],
+    ["life", "生活"],
+  ];
+  return `<nav class="tabbar">${tabs
+    .map(
+      ([id, label]) =>
+        `<button data-nav="${id}" class="${state.view === id || (id === "workout" && state.view === "history") ? "active" : ""}"><span class="ico">${icon(id)}</span>${label}</button>`
+    )
+    .join("")}</nav>`;
+}
+
+function icon(id) {
+  return { today: "●", workout: "≡", review: "◎", library: "＋", life: "☾" }[id];
+}
+
+function viewHtml() {
+  if (state.view === "workout") return workoutHtml();
+  if (state.view === "history") return historyHtml();
+  if (state.view === "review") return reviewPageHtml();
+  if (state.view === "library") return libraryHtml();
+  if (state.view === "life") return lifeHtml();
+  return todayHtml();
+}
+
+function todayHtml() {
+  const sug = suggestion();
+  const weekly = workoutsThisWeek().length;
+  const meal = todayMeal();
+  const sleep = todaySleep();
+  const last = lastWorkout();
+  return `
+    <section class="stats">
+      <div class="stat"><span>今週</span><b>${weekly}/${PROFILE.weeklyTrainingMin}–${PROFILE.weeklyTrainingMax}</b></div>
+      <div class="stat"><span>タンパク質</span><b>${meal.protein || "—"}</b></div>
+      <div class="stat"><span>睡眠</span><b>${sleep.quality ? sleep.hours + "h" : "—"}</b></div>
+    </section>
+    ${weekCalendarHtml()}
+    <section class="card accent">
+      <div class="kicker">自動コーチ · ${phaseLabel()} · ${todayStr().replaceAll("-", ".")} ${weekdayJa(todayStr())}</div>
+      <h2 style="margin-top:8px">${escapeHtml(sug.title)}</h2>
+      <p class="muted coach-note">${escapeHtml(sug.detail)}</p>
+      ${sug.done ? "" : `<button class="btn" data-start="${sug.type}">${escapeHtml(sug.action)}</button>`}
+      <button class="btn ghost" data-nav="review" style="margin-top:8px">振り返りを見る</button>
+      <button class="btn ghost" data-nav="history" style="margin-top:8px">履歴を見る</button>
+    </section>
+    ${sessionPreview(sug.done ? nextSessionType() : sug.type)}
+    ${weeklySummaryCard()}
+    <section class="card">
+      <div class="row">
+        <h3>直近の記録</h3>
+        <span class="muted">${last ? last.date : "まだなし"}</span>
+      </div>
+      <p class="muted" style="margin:8px 0 0">
+        ${last ? `${last.sessionType} ${SESSION_META[last.sessionType].name} · ${last.exercises.length}種目` : "初回は重量よりフォーム。セーフティバーを必ずセット。"}
+      </p>
+      ${last?.review ? `<p class="muted" style="margin-top:8px">${escapeHtml(last.review.aiText ? last.review.aiText.split("\n")[0] : last.review.summary)}</p>` : ""}
+    </section>
+  `;
+}
+
+function weekCalendarHtml() {
+  let cal = state.coachPlan?.weekSchedule;
+  if (!cal || !cal.days) {
+    try {
+      if (typeof CoachEngine.buildWeekSchedule !== "function") {
+        return `<section class="card"><div class="kicker">週間カレンダー</div><h3>更新が必要です</h3><p class="muted">${repairLinkHtml()}</p></section>`;
+      }
+      cal = CoachEngine.buildWeekSchedule(load(), nextSessionType());
+    } catch (err) {
+      console.error(err);
+      return `<section class="card"><div class="kicker">週間カレンダー</div><h3>予定を表示できません</h3><p class="muted">アプリを開き直してください。</p></section>`;
+    }
+  }
+  const nextDate = cal.nextDate;
+  const nextType = cal.nextSessionType;
+  const meta = SESSION_META[nextType] || { name: "" };
+  const nextLabel = nextDate
+    ? `${nextDate.replaceAll("-", "/").slice(5)}（${weekdayJa(nextDate)}） ${nextType} ${meta.name}`
+    : "今週の予定は完了";
+  const hint =
+    cal.nextWeekHint && cal.nextWeekHint.date !== nextDate
+      ? `<p class="muted" style="margin-top:8px">来週: ${cal.nextWeekHint.date.replaceAll("-", "/").slice(5)}（${cal.nextWeekHint.weekday}） ${cal.nextWeekHint.sessionType} ${SESSION_META[cal.nextWeekHint.sessionType].name}</p>`
+      : cal.nextWeekHint
+        ? `<p class="muted" style="margin-top:8px">来週 ${cal.nextWeekHint.date.replaceAll("-", "/").slice(5)}（${cal.nextWeekHint.weekday}）が次の予定です。</p>`
+        : "";
+  return `<section class="card">
+    <div class="row">
+      <div>
+        <div class="kicker">週間カレンダー</div>
+        <h3 style="margin-top:6px">次は ${escapeHtml(nextLabel)}</h3>
+      </div>
+      <span class="muted">${cal.doneCount}/${cal.target}回</span>
+    </div>
+    <div class="week-cal">
+      ${cal.days
+        .map((day) => {
+          const cls = ["week-cell", day.kind, day.isToday ? "today" : "", day.isNext ? "next" : ""]
+            .filter(Boolean)
+            .join(" ");
+          const action =
+            day.kind === "done"
+              ? `data-hist="${day.date}"`
+              : day.kind === "train" && day.isToday
+                ? `data-start="${day.sessionType}"`
+                : "";
+          const tag = action ? "button" : "div";
+          const typeAttr = tag === "button" ? ' type="button"' : "";
+          return `<${tag} class="${cls}" ${action}${typeAttr}>
+            <span class="wday">${day.weekday}</span>
+            <span class="wnum">${day.dayNum}</span>
+            <span class="wtag">${escapeHtml(day.label)}</span>
+          </${tag}>`;
+        })
+        .join("")}
+    </div>
+    ${hint}
+    <p class="muted" style="margin-top:8px">月・水・金が基本。連続は避け、間はランか休養です。</p>
+  </section>`;
+}
+
+function imgSrc(id) {
+  return `./images/${id}.jpg`;
+}
+
+function motionThumb(id) {
+  return `<img class="motion-thumb" src="${imgSrc(id)}" alt="" />`;
+}
+
+function exerciseCard(id, extra = "") {
+  const ex = EXERCISE_MAP[id];
+  const rec = recommend(ex);
+  const weight = ex.bodyweight ? "自重" : `${rec.weight}kg`;
+  return `<button class="ex-item" data-open="${id}">
+    ${motionThumb(id)}
+    <div class="ex-copy">
+      <div class="row"><h3>${ex.name}</h3><span class="badge">${weight}</span></div>
+      <div class="meta"><span>${ex.muscle} · ${ex.sets}×${ex.repMin}–${ex.repMax}</span><span>やり方</span></div>
+      ${extra}
+    </div>
+  </button>`;
+}
+
+function weeklySummaryCard() {
+  const s = state.coachPlan?.weeklySummary;
+  if (!s) return "";
+  return `<section class="card">
+    <h3>今週のサマリー</h3>
+    <div class="stats" style="margin-top:8px">
+      <div class="stat"><span>セッション</span><b>${s.sessions}</b></div>
+      <div class="stat"><span>総セット</span><b>${s.totalSets}</b></div>
+      <div class="stat"><span>ボリューム</span><b>${s.totalVolumeKg || "—"}kg</b></div>
+    </div>
+    <p class="muted" style="margin-top:8px">重点部位: ${escapeHtml(s.topMuscle)} · 総レップ ${s.totalReps}回</p>
+  </section>`;
+}
+
+function reviewBlockHtml(review, date) {
+  if (!review && !state.reviewing) return "";
+  const isAi = review?.source === "ollama" && review?.aiText;
+  const source = isAi ? "AI振り返り" : "コーチ振り返り";
+  const body = isAi
+    ? `<p class="coach-note review-ai">${escapeHtml(review.aiText)}</p>`
+    : review
+      ? `<p class="muted">${escapeHtml(review.summary)}</p>
+         <p class="coach-note"><b>よかった点</b>\n${escapeHtml(review.goods)}\n\n<b>改善点</b>\n${escapeHtml(review.improves)}\n\n<b>前回比</b>\n${escapeHtml(review.vsPrev)}</p>
+         <p class="muted">${escapeHtml(review.next)}</p>`
+      : "";
+  const wait = state.reviewing ? `<p class="muted">MacのAIで詳しく振り返っています…</p>` : "";
+  const ask =
+    !state.reviewing && review && review.source !== "ollama" && date
+      ? `<button class="btn ghost" type="button" data-ai-review="${date}" style="margin-top:8px">AIで詳しく振り返る</button>`
+      : "";
+  return `<section class="review-card">
+    <div class="kicker">${source}</div>
+    ${wait}
+    ${body}
+    ${ask}
+  </section>`;
+}
+
+function nextPreviewHtml() {
+  if (!state.showNextPreview) return "";
+  const last = completedWorkouts().slice(-1)[0];
+  const plan = state.coachPlan;
+  const type = plan?.nextSessionType;
+  const meta = type ? SESSION_META[type] : null;
+  const nextBlock = plan && meta
+    ? `<div class="kicker" style="margin-top:16px">次回プレビュー</div>
+    <h2>${type} ${meta.name}</h2>
+    <p class="muted coach-note">${escapeHtml(plan.coachNote)}</p>
+    <div class="stack" style="margin-top:12px">
+      ${plan.exercises.slice(0, 4).map((id) => {
+        const ex = EXERCISE_MAP[id];
+        const t = plan.targets[id];
+        const w = ex.bodyweight ? "自重" : `${t.weight}kg`;
+        return `<div class="ex-item" style="pointer-events:none">
+          ${motionThumb(id)}
+          <div class="ex-copy"><h3>${ex.name}</h3><span class="muted">${w} × ${t.reps}回</span></div>
+        </div>`;
+      }).join("")}
+    </div>`
+    : "";
+  return `<div class="sheet-bg" data-close-preview="1"><div class="sheet" data-stop="1">
+    <div class="kicker">セッション完了</div>
+    <h2>今日の振り返り</h2>
+    ${last ? reviewBlockHtml(last.review, last.date) : ""}
+    ${nextBlock}
+    <button class="btn" type="button" data-close-preview-btn="1" style="margin-top:16px">OK</button>
+  </div></div>`;
+}
+
+function restTimerBar() {
+  if (!state.restTimer) return "";
+  const t = state.restTimer;
+  return `<div class="rest-bar">
+    <span>休憩 ${t.left}s</span>
+    <button type="button" data-rest-skip="1">スキップ</button>
+  </div>`;
+}
+
+function sessionPreview(type) {
+  const ids = sessionExercises(type);
+  return `
+    <section class="stack">
+      ${ids
+        .map((id) => {
+          const rec = recommend(EXERCISE_MAP[id]);
+          return exerciseCard(id, `<div class="muted">${escapeHtml(rec.reason)}</div>`);
+        })
+        .join("")}
+    </section>
+  `;
+}
+
+function workoutHtml() {
+  const draft = state.draft || db().draft;
+  if (!draft) {
+    return `<div class="empty">まだ開始していません。<br>「今日」からセッションを始めてください。</div>
+      <button class="btn" data-nav="today">今日の提案へ</button>
+      <button class="btn ghost" data-nav="history">過去の履歴</button>`;
+  }
+  return `
+    <section class="card">
+      <div class="row">
+        <div>
+          <div class="kicker">${draft.sessionType} ${SESSION_META[draft.sessionType].name}</div>
+          <h2>${draft.date.replaceAll("-", ".")}</h2>
+        </div>
+        <button class="btn small ghost" data-nav="history">履歴</button>
+      </div>
+      <p class="muted">${sessionFocus(draft.sessionType)}。休憩はコンパウンド90–120秒、腕は60–90秒。</p>
+    </section>
+    ${draft.exercises
+      .map((row) => {
+        const ex = EXERCISE_MAP[row.id];
+        const rec = recommend(ex);
+        return `<section class="card">
+          <div class="row">
+            ${motionThumb(row.id)}
+            <div style="flex:1">
+              <h3>${ex.name}</h3>
+              <div class="muted">${ex.sets}×${ex.repMin}–${ex.repMax} · 目安 ${ex.bodyweight ? "自重" : rec.weight + "kg"}</div>
+            </div>
+            <button class="btn small ghost" data-open="${ex.id}">やり方</button>
+          </div>
+          <p class="reason">${escapeHtml(rec.reason)}</p>
+          ${row.sets
+            .map(
+              (set, i) => `<div class="set-row">
+              <div class="muted">#${i + 1}</div>
+              ${
+                ex.bodyweight
+                  ? `<div class="muted" style="text-align:center">自重</div>`
+                  : stepperHtml(`w:${row.id}:${i}`, set.weight, "kg")
+              }
+              ${stepperHtml(`r:${row.id}:${i}`, set.reps, "回")}
+              <button class="btn small ghost" type="button" data-rest="${row.id}:${i}" style="margin-top:6px;width:100%">休憩タイマー</button>
+            </div>`
+            )
+            .join("")}
+        </section>`;
+      })
+      .join("")}
+    <button class="btn" data-finish="1">このセッションを完了</button>
+    <button class="btn ghost" data-clear-draft="1">下書きを破棄</button>
+  `;
+}
+
+function stepperHtml(key, value, unit) {
+  return `<div class="stepper" data-step="${key}">
+    <button data-delta="-1">−</button>
+    <div class="val">${value}${unit}</div>
+    <button data-delta="1">+</button>
+  </div>`;
+}
+
+function historyHtml() {
+  const workouts = completedWorkouts().slice().reverse();
+  if (!workouts.length) return `<div class="empty">完了したセッションはまだありません。</div>`;
+  const lifts = ["bench-press", "ohp", "barbell-row", "lat-pulldown"];
+  const liftCards = lifts
+    .map((id) => {
+      const ex = EXERCISE_MAP[id];
+      const log = lastLogs(id);
+      return `<div class="stat"><span>${ex.name}</span><b>${log && !ex.bodyweight ? log.sets[0].weight + "kg" : log ? log.sets.map((s) => s.reps).join("/") : "—"}</b></div>`;
+    })
+    .join("");
+  return `
+    <section class="stats">${liftCards}</section>
+    <section class="card">
+      ${workouts
+        .map(
+          (w) => `<button class="history-item" data-hist="${w.date}">
+            <div class="row"><b>${w.date.replaceAll("-", ".")} ${weekdayJa(w.date)}</b><span class="badge">${w.sessionType} ${SESSION_META[w.sessionType].name}</span></div>
+            <div class="muted">${w.exercises.map((ex) => EXERCISE_MAP[ex.id].name).join(" / ")}${w.review ? " · 振り返りあり" : ""}</div>
+          </button>`
+        )
+        .join("")}
+    </section>
+    <button class="btn ghost" data-nav="workout">今日の記録へ</button>
+  `;
+}
+
+function reviewPageHtml() {
+  const workouts = completedWorkouts().slice().reverse();
+  if (!workouts.length) {
+    return `<section class="card">
+      <div class="kicker">振り返り</div>
+      <h2>まだありません</h2>
+      <p class="muted">「記録」でセッションを完了すると、ここに今日の振り返りが出ます。Mac接続時はAIでも詳しく書きます。</p>
+    </section>`;
+  }
+  return workouts
+    .map((w) => {
+      const meta = SESSION_META[w.sessionType] || { name: w.sessionType };
+      return `<section class="card">
+        <div class="kicker">${w.date.replaceAll("-", ".")} ${weekdayJa(w.date)} · ${w.sessionType} ${meta.name}</div>
+        ${reviewBlockHtml(w.review, w.date) || `<p class="muted">記録から振り返りを作成しています。</p>`}
+      </section>`;
+    })
+    .join("");
+}
+
+function libraryHtml() {
+  return `<section class="stack">
+    ${EXERCISES.map((ex) => exerciseCard(ex.id, `<div class="muted">${escapeHtml(ex.equipment)}</div>`)).join("")}
+  </section>`;
+}
+
+function lifeHtml() {
+  const meal = todayMeal();
+  const sleep = todaySleep();
+  const body = todayBody();
+  const weightSeries = chartSeries("kg");
+  const fatSeries = chartSeries("bodyFat");
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const date = parseDate(weekStart());
+    date.setDate(date.getDate() + i);
+    return todayStr(date);
+  });
+  const meals = db().meals;
+  return `
+    <section class="card">
+      <div class="row"><h3>体重・体脂肪</h3><span class="muted">${body.saved ? "今日記録済" : "未記録"}</span></div>
+      <p class="muted">毎日でなくてOK。同じ条件（朝・空腹など）で測るとグラフが読みやすいです。</p>
+      <div class="metric-grid">
+        <div>
+          <div class="metric-label">体重</div>
+          ${stepperHtml("body-weight", body.kg, "kg")}
+        </div>
+        <div>
+          <div class="metric-label">体脂肪率</div>
+          ${stepperHtml("body-fat", body.bodyFat, "%")}
+        </div>
+      </div>
+      <button class="btn" type="button" data-save-body="1" style="margin-top:12px">今日の数値を記録</button>
+      <p class="muted" style="margin-top:8px">開始時 ${PROFILE.startWeightKg}kg / ${PROFILE.startBodyFat}% · 目標は体脂肪10–12%前後</p>
+    </section>
+    <section class="card">
+      <h3>体重の推移</h3>
+      ${lineChartSvg(weightSeries, "kg", "#6aa6ff", "kg")}
+    </section>
+    <section class="card">
+      <h3>体脂肪率の推移</h3>
+      ${lineChartSvg(fatSeries, "bodyFat", "#3ddc97", "%")}
+    </section>
+    <section class="card">
+      <h3>記録一覧</h3>
+      <div class="body-log-head"><span>日付</span><span>体重</span><span>体脂肪</span></div>
+      ${bodyHistoryHtml()}
+    </section>
+    <section class="card">
+      <h3>今週の食事ログ</h3>
+      <p class="muted">カロリー計算はしません。タンパク質の目安 ${PROFILE.proteinTargetG}g と、食べ具合だけ。</p>
+      <div class="week" style="margin-top:10px">
+        ${days
+          .map((d) => {
+            const hit = meals.some((m) => m.date === d && m.protein);
+            return `<div class="daydot ${hit ? "done" : ""} ${d === todayStr() ? "today" : ""}"><i></i>${weekdayJa(d)}</div>`;
+          })
+          .join("")}
+      </div>
+    </section>
+    <section class="card">
+      <div class="row"><h3>今日のタンパク質</h3><b>${meal.protein || 0}g</b></div>
+      <div class="progress-bar" style="margin:10px 0 12px"><span style="width:${Math.min(100, ((meal.protein || 0) / PROFILE.proteinTargetG) * 100)}%"></span></div>
+      <div class="pills">
+        ${[60, 90, 130, 160].map((n) => `<button class="pill ${meal.protein === n ? "active" : ""}" data-protein="${n}">${n}g</button>`).join("")}
+      </div>
+      <h3 style="margin-top:16px">食べ具合</h3>
+      <div class="pills" style="margin-top:8px">
+        <button class="pill poor ${meal.quality === "poor" ? "active" : ""}" data-quality="poor">不足</button>
+        <button class="pill ok ${meal.quality === "ok" ? "active" : ""}" data-quality="ok">普通</button>
+        <button class="pill good ${meal.quality === "good" ? "active" : ""}" data-quality="good">十分</button>
+      </div>
+      <textarea class="note" data-meal-note="1" placeholder="任意メモ（外食、間食など）">${escapeHtml(meal.note || "")}</textarea>
+    </section>
+    <section class="card">
+      <div class="row"><h3>睡眠</h3><span class="muted">7時間以上が目安</span></div>
+      ${stepperHtml("sleep-hours", sleep.hours, "h")}
+      <div class="pills" style="margin-top:12px">
+        <button class="pill poor ${sleep.quality === "poor" ? "active" : ""}" data-sleepq="poor">浅い</button>
+        <button class="pill ok ${sleep.quality === "ok" ? "active" : ""}" data-sleepq="ok">普通</button>
+        <button class="pill good ${sleep.quality === "good" ? "active" : ""}" data-sleepq="good">良い</button>
+      </div>
+    </section>
+    <section class="card">
+      <h3>アプリの修復</h3>
+      <p class="muted">白い画面・更新が反映されないときはこちら</p>
+      <p style="margin-top:10px">${repairLinkHtml()}</p>
+    </section>
+  `;
+}
+
+function sheetHtml() {
+  const ex = EXERCISE_MAP[state.sheet];
+  if (!ex) return "";
+  const rec = recommend(ex);
+  const cues = CUES[ex.id] || [];
+  return `<div class="sheet-bg" data-close-sheet="1"><div class="sheet sheet-guide" data-stop="1">
+    <div class="hero-bar">
+      <button class="sheet-back" type="button" data-close-btn="1">‹ 戻る</button>
+      <span class="hero-tag">${escapeHtml(ex.muscle)}</span>
+    </div>
+    <div class="hero-still">
+      <img src="${imgSrc(ex.id)}" alt="${escapeHtml(ex.name)}の動作（開始・中間・終了）" />
+      <div class="motion-phases still"><span>開始</span><span>中間</span><span>終了</span></div>
+    </div>
+    <div class="sheet-body">
+      <h2>${ex.name}</h2>
+      <p class="hero-eq">${escapeHtml(ex.equipment)}</p>
+      <div class="cue-chips">${cues.map((cue) => `<span>${escapeHtml(cue)}</span>`).join("")}</div>
+      <div class="guide-meta">
+        <span>${ex.sets}セット × ${ex.repMin}–${ex.repMax}回</span>
+        <span>休憩 ${ex.restSec}秒</span>
+        <span>${ex.bodyweight ? "自重" : "目安 " + rec.weight + "kg"}</span>
+      </div>
+      <p class="scroll-hint">下にスクロールしてやり方</p>
+      ${guideBlock("01", "器具のセット", ex.setup)}
+      ${guideBlock("02", "フォーム", ex.form)}
+      ${guideBlock("03", "やりがちなミス", ex.mistakes, true)}
+      <button class="btn" type="button" data-close-btn="1" style="margin-top:20px">閉じる</button>
+    </div>
+  </div></div>`;
+}
+
+function guideBlock(num, title, lines, warn = false) {
+  return `<section class="guide-block ${warn ? "warn" : ""}">
+    <div class="sec-label"><i>${num}</i>${title}</div>
+    <ol class="steps">${lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ol>
+  </section>`;
+}
+
+function bind() {
+  document.querySelectorAll("[data-nav]").forEach((el) =>
+    el.addEventListener("click", () => {
+      state.view = el.dataset.nav;
+      if (state.view === "workout") state.draft = db().draft;
+      render();
+    })
+  );
+  document.querySelectorAll("[data-start]").forEach((el) =>
+    el.addEventListener("click", () => {
+      ensureDraft(el.dataset.start);
+      state.view = "workout";
+      render();
+    })
+  );
+  document.querySelectorAll("[data-open]").forEach((el) =>
+    el.addEventListener("click", () => {
+      openOverlay("sheet", el.dataset.open);
+    })
+  );
+  document.querySelectorAll("[data-close-sheet]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      if (ev.target === el) closeOverlay();
+    })
+  );
+  document.querySelectorAll("[data-close-btn]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeOverlay();
+    })
+  );
+  document.querySelectorAll("[data-stop]").forEach((el) =>
+    el.addEventListener("click", (ev) => ev.stopPropagation())
+  );
+  document.querySelectorAll("[data-step]").forEach((el) => {
+    el.querySelectorAll("[data-delta]").forEach((btn) =>
+      btn.addEventListener("click", () => applyStep(el.dataset.step, Number(btn.dataset.delta)))
+    );
+  });
+  document.querySelectorAll("[data-finish]").forEach((el) => el.addEventListener("click", finishWorkout));
+  document.querySelectorAll("[data-ai-review]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const w = completedWorkouts().find((row) => row.date === el.dataset.aiReview);
+      if (w) requestAiReview(w);
+    })
+  );
+  document.querySelectorAll("[data-clear-draft]").forEach((el) =>
+    el.addEventListener("click", () => {
+      patch({ draft: null });
+      state.draft = null;
+      state.view = "today";
+      render();
+    })
+  );
+  document.querySelectorAll("[data-protein]").forEach((el) =>
+    el.addEventListener("click", () => {
+      upsertByDate("meals", { ...todayMeal(), protein: Number(el.dataset.protein) });
+      render();
+    })
+  );
+  document.querySelectorAll("[data-quality]").forEach((el) =>
+    el.addEventListener("click", () => {
+      upsertByDate("meals", { ...todayMeal(), quality: el.dataset.quality });
+      render();
+    })
+  );
+  document.querySelectorAll("[data-sleepq]").forEach((el) =>
+    el.addEventListener("click", () => {
+      upsertByDate("sleeps", { ...todaySleep(), quality: el.dataset.sleepq });
+      render();
+    })
+  );
+  document.querySelectorAll("[data-save-body]").forEach((el) =>
+    el.addEventListener("click", () => {
+      saveTodayBody();
+      render();
+    })
+  );
+  document.querySelectorAll("[data-meal-note]").forEach((el) =>
+    el.addEventListener("change", () => {
+      upsertByDate("meals", { ...todayMeal(), note: el.value });
+    })
+  );
+  document.querySelectorAll("[data-hist]").forEach((el) =>
+    el.addEventListener("click", () => {
+      openOverlay("hist", el.dataset.hist);
+    })
+  );
+  document.querySelectorAll("[data-rest]").forEach((el) =>
+    el.addEventListener("click", () => startRestTimer(el.dataset.rest.split(":")[0]))
+  );
+  document.querySelectorAll("[data-rest-skip]").forEach((el) =>
+    el.addEventListener("click", () => {
+      clearRestTimer();
+      render();
+    })
+  );
+  document.querySelectorAll("[data-close-preview]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      if (ev.target.dataset.closePreview) {
+        state.showNextPreview = false;
+        render();
+      }
+    })
+  );
+  document.querySelectorAll("[data-close-preview-btn]").forEach((el) =>
+    el.addEventListener("click", () => {
+      state.showNextPreview = false;
+      render();
+    })
+  );
+  document.querySelectorAll("[data-close-hist]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      if (ev.target === el) closeOverlay();
+    })
+  );
+}
+
+function openOverlay(kind, id) {
+  if (kind === "sheet") state.sheet = id;
+  if (kind === "hist") state.historyDate = id;
+  history.pushState({ overlay: kind, id }, "");
+  render();
+}
+
+function closeOverlay(fromPop = false) {
+  const shouldGoBack = !fromPop && Boolean(history.state && history.state.overlay);
+  state.sheet = null;
+  state.historyDate = null;
+  render();
+  if (shouldGoBack) history.back();
+}
+
+window.addEventListener("popstate", () => {
+  if (state.sheet || state.historyDate) closeOverlay(true);
+});
+
+function historySheetHtml() {
+  const w = completedWorkouts().find((row) => row.date === state.historyDate);
+  if (!w) return "";
+  if (w.completed && !w.review) {
+    const review = CoachEngine.reviewSession(w, db().workouts);
+    const workouts = db().workouts.map((row) => (row.date === w.date ? { ...row, review } : row));
+    patch({ workouts });
+    w.review = review;
+  }
+  return `<div class="sheet-bg" data-close-hist="1"><div class="sheet" data-stop="1">
+    <button class="sheet-back dark" type="button" data-close-btn="1">‹ 戻る</button>
+    <div class="handle"></div>
+    <div class="kicker" style="margin-top:36px">${w.sessionType} ${SESSION_META[w.sessionType].name}</div>
+    <h2 style="margin-top:6px">${w.date.replaceAll("-", ".")} ${weekdayJa(w.date)}</h2>
+    ${w.exercises
+      .map((ex) => {
+        const name = EXERCISE_MAP[ex.id].name;
+        const sets = ex.sets
+          .map((s, i) => `#${i + 1} ` + (EXERCISE_MAP[ex.id].bodyweight ? `${s.reps}回` : `${s.weight}kg × ${s.reps}回`))
+          .join("<br>");
+        return `<div class="howto"><h4>${name}</h4><p class="muted">${sets}</p></div>`;
+      })
+      .join("")}
+    ${reviewBlockHtml(w.review, w.date)}
+    <button class="btn" type="button" data-close-btn="1" style="margin-top:16px">閉じる</button>
+  </div></div>`;
+}
+
+function saveTodayBody() {
+  const body = todayBody();
+  const weights = db().weights.filter((w) => w.date !== todayStr());
+  weights.push({ date: todayStr(), kg: body.kg, bodyFat: body.bodyFat });
+  patch({ weights });
+}
+
+function applyStep(key, delta) {
+  if (key === "sleep-hours") {
+    const sleep = todaySleep();
+    const hours = Math.max(4, Math.min(12, roundStep((sleep.hours || 7) + delta * 0.5, 0.5)));
+    upsertByDate("sleeps", { ...sleep, hours });
+    render();
+    return;
+  }
+  if (key === "body-weight" || key === "body-fat") {
+    const body = todayBody();
+    const next =
+      key === "body-weight"
+        ? { ...body, kg: Math.max(40, Math.min(120, roundStep(body.kg + delta * 0.1, 0.1))) }
+        : { ...body, bodyFat: Math.max(5, Math.min(40, roundStep(body.bodyFat + delta * 0.1, 0.1))) };
+    const weights = db().weights.filter((w) => w.date !== todayStr());
+    weights.push({ date: todayStr(), kg: next.kg, bodyFat: next.bodyFat });
+    patch({ weights });
+    render();
+    return;
+  }
+  const [kind, id, index] = key.split(":");
+  const draft = state.draft || db().draft;
+  if (!draft) return;
+  const row = draft.exercises.find((ex) => ex.id === id);
+  const exercise = EXERCISE_MAP[id];
+  const set = row.sets[Number(index)];
+  if (kind === "w") {
+    const step = exercise.incrementKg || 2.5;
+    set.weight = Math.max(0, roundStep(set.weight + delta * step, step));
+  } else {
+    set.reps = Math.max(0, set.reps + delta);
+  }
+  state.draft = draft;
+  patch({ draft });
+  render();
+}
+
+function startRestTimer(exerciseId) {
+  const sec = CoachEngine.restSecondsFor(exerciseId);
+  clearRestTimer();
+  state.restTimer = { left: sec, total: sec };
+  restInterval = setInterval(() => {
+    state.restTimer.left -= 1;
+    if (state.restTimer.left <= 0) {
+      clearRestTimer();
+    }
+    render();
+  }, 1000);
+  render();
+}
+
+let restInterval = null;
+function clearRestTimer() {
+  if (restInterval) clearInterval(restInterval);
+  restInterval = null;
+  state.restTimer = null;
+}
+
+function finishWorkout() {
+  const draft = state.draft || db().draft;
+  if (!draft) return;
+  const completed = { ...draft, completed: true };
+  const workouts = db().workouts.filter((w) => w.date !== draft.date);
+  completed.review = CoachEngine.reviewSession(completed, workouts);
+  workouts.push(completed);
+  patch({ workouts, draft: null });
+  refreshCoachPlan();
+  state.draft = null;
+  state.view = "today";
+  state.showNextPreview = true;
+  state.reviewing = true;
+  clearRestTimer();
+  syncPush(true);
+  render();
+  requestAiReview(completed);
+}
+
+async function requestAiReview(workout) {
+  state.reviewing = true;
+  render();
+  if (!canSync()) {
+    state.reviewing = false;
+    render();
+    return;
+  }
+  try {
+    const slim = {
+      date: workout.date,
+      sessionType: workout.sessionType,
+      exercises: workout.exercises,
+    };
+    const res = await fetch("/api/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workout: slim,
+          localReview: workout.review
+            ? {
+                summary: workout.review.summary,
+                goods: workout.review.goods,
+                improves: workout.review.improves,
+                vsPrev: workout.review.vsPrev,
+                next: workout.review.next,
+              }
+            : {},
+        }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.text) {
+        const workouts = db().workouts.map((w) =>
+          w.date === workout.date
+            ? {
+                ...w,
+                review: {
+                  ...(w.review || {}),
+                  aiText: data.text,
+                  source: "ollama",
+                  generatedAt: new Date().toISOString(),
+                },
+              }
+            : w
+        );
+        patch({ workouts });
+      }
+    }
+  } catch {
+    /* local review stays */
+  }
+  state.reviewing = false;
+  syncPush(true);
+  render();
+}
+
+async function checkAppUpdate() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    await withTimeout(reg.update(), 3000);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function refreshFromServer() {
+  state.syncStatus = "pending";
+  render();
+  try {
+    await checkAppUpdate();
+  } catch {
+    /* ignore */
+  }
+  try {
+    await syncPull();
+  } catch {
+    state.syncStatus = "offline";
+  }
+  try {
+    ensureReviews();
+  } catch (err) {
+    console.error(err);
+  }
+  try {
+    ensureCoachPlan();
+  } catch (err) {
+    console.error(err);
+  }
+  try {
+    await loadCoachPlan();
+  } catch {
+    /* local plan */
+  }
+  render();
+}
+
+async function onAppVisible() {
+  await refreshFromServer();
+}
+
+function bootstrap() {
+  state.coachPlan = load().coachPlan || null;
+  try {
+    ensureCoachPlan();
+  } catch (err) {
+    console.error(err);
+  }
+  try {
+    render();
+  } catch (err) {
+    console.error(err);
+    showBootError(err);
+  }
+  refreshFromServer();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") onAppVisible();
+  });
+  window.addEventListener("online", () => onAppVisible());
+  setInterval(() => {
+    if (document.visibilityState === "visible" && canSync()) syncPush(true);
+  }, 60000);
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js?v=20").catch(() => {});
+  });
+}
+
+bootstrap();

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Training" />
+    <meta name="theme-color" content="#0b0d10" />
+    <title>Training</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <link rel="stylesheet" href="./styles.css?v=20" />
+    <style>
+      html,
+      body {
+        background: #0b0d10;
+        color: #f3f5f7;
+        margin: 0;
+        min-height: 100%;
+      }
+      #boot {
+        padding: 28px 24px;
+        font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+      }
+      #boot h2 {
+        margin: 0;
+        font-size: 24px;
+      }
+      #boot p {
+        color: #8b95a5;
+        line-height: 1.6;
+        margin-top: 12px;
+      }
+      #boot a {
+        color: #6aa6ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <main id="boot">
+        <h2>Training</h2>
+        <p>読み込み中…</p>
+        <p id="repair-hint"></p>
+      </main>
+    </div>
+    <script>
+      (function () {
+        var url = location.origin + "/update.html";
+        var el = document.getElementById("repair-hint");
+        if (el) {
+          el.innerHTML = 'うまく開かないときは <a href="./update.html">' + url + "</a>";
+        }
+      })();
+      window.__bootFailed = function (msg) {
+        var app = document.getElementById("app");
+        if (!app) return;
+        var url = location.origin + "/update.html";
+        app.innerHTML =
+          '<main id="boot"><h2>起動できませんでした</h2><p>' +
+          (msg || "ネットワークを確認してください。") +
+          '</p><p><a href="./update.html">' +
+          url +
+          "</a></p></main>";
+      };
+      window.addEventListener("error", function (ev) {
+        if (document.getElementById("boot")) window.__bootFailed(ev.message || "読み込みエラー");
+      });
+      setTimeout(function () {
+        var boot = document.getElementById("boot");
+        if (boot) {
+          var url = location.origin + "/update.html";
+          var p = boot.querySelector("p");
+          if (p) {
+            p.innerHTML = 'まだ読み込めない場合は <a href="./update.html">' + url + "</a> を開いて修復してください。";
+          }
+        }
+      }, 8000);
+    </script>
+    <script src="./data.js?v=20"></script>
+    <script src="./coach.js?v=20"></script>
+    <script src="./app.js?v=20"></script>
+  </body>
+</html>
