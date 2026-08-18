@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 33;
+const APP_VERSION = 34;
 
 const state = {
   view: "today",
@@ -15,6 +15,7 @@ const state = {
   editDraft: null,
   runDate: null,
   runNotice: "",
+  planDate: null,
 };
 
 let syncTimer = null;
@@ -75,13 +76,13 @@ function showBootError(err) {
 }
 
 function repairUrl() {
-  return new URL("./update.html", location.href).href;
+  return new URL("./v34.html", location.href).href;
 }
 
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./update.html" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./v34.html" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -121,6 +122,7 @@ function mergeAll(local, remote) {
     sleeps: mergeByDate(localOk.sleeps, remoteOk.sleeps),
     weights: mergeByDate(localOk.weights, remoteOk.weights),
     runs: mergeByDate(localOk.runs, remoteOk.runs),
+    scheduleOverrides: { ...(remoteOk.scheduleOverrides || {}), ...(localOk.scheduleOverrides || {}) },
     draft: localOk.draft && localOk.draft.date === todayStr() ? localOk.draft : remoteOk.draft ?? localOk.draft,
     profileStartDate: localOk.profileStartDate || remoteOk.profileStartDate || PROFILE.startDate,
     pendingSync: false,
@@ -267,21 +269,10 @@ function refreshCoachPlan(completedWorkout) {
 
 function ensureCoachPlan() {
   try {
-    const data = load();
-    const all = completedWorkouts();
-    const last = all.length ? all[all.length - 1] : null;
-    const plan = data.coachPlan;
-    const weekOf = weekStart();
-    const needsWeekly = !plan || !plan.weeklyPlan || plan.weekOf !== weekOf;
-    const needsMicro = last && plan && plan.basedOnDate !== last.date;
-    if (!plan || needsWeekly || needsMicro) {
-      return refreshCoachPlan();
-    }
-    state.coachPlan = plan;
-    return plan;
+    return refreshCoachPlan();
   } catch (err) {
     console.error(err);
-    return state.coachPlan || null;
+    return state.coachPlan || load().coachPlan || null;
   }
 }
 
@@ -365,11 +356,15 @@ function pickBack() {
 }
 
 function nextSessionType() {
-  return state.coachPlan?.nextSessionType || (() => {
-    const last = lastWorkout();
-    if (!last) return "A";
-    return { A: "B", B: "C", C: "A" }[last.sessionType] || "A";
-  })();
+  return (
+    state.coachPlan?.weekSchedule?.nextSessionType ||
+    state.coachPlan?.nextSessionType ||
+    (() => {
+      const last = lastWorkout();
+      if (!last) return "A";
+      return { A: "B", B: "C", C: "A" }[last.sessionType] || "A";
+    })()
+  );
 }
 
 function sessionExercises(type) {
@@ -619,6 +614,22 @@ function suggestion() {
       resume: true,
     };
   }
+  const todayCal = (plan.weekSchedule?.days || []).find((d) => d.date === today);
+  if (todayCal && todayCal.kind !== "train" && todayCal.kind !== "done") {
+    const type = plan.weekSchedule?.nextSessionType || nextSessionType();
+    const meta = SESSION_META[type] || SESSION_META.A;
+    const when = plan.weekSchedule?.nextDate
+      ? `${plan.weekSchedule.nextDate.replaceAll("-", "/").slice(5)}（${weekdayJa(plan.weekSchedule.nextDate)}）`
+      : "次の空き日";
+    const kindLabel = todayCal.kind === "run" ? "ラン日" : "休養日";
+    return {
+      type,
+      title: `今日は${kindLabel}`,
+      detail: `次のトレーニングは ${when} ${type} ${meta.name}。カレンダーの日付をタップすると、休養とトレを入れ替えできます。`,
+      action: `それでも${type}を始める`,
+      rest: true,
+    };
+  }
   const weekly = workoutsThisWeek();
   if (weekly.length >= PROFILE.weeklyTrainingMax) {
     const type = nextSessionType();
@@ -681,12 +692,12 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./update.html" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./v34.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
     ${tabbar()}
-    ${state.sheet ? sheetHtml() : ""}${state.historyDate ? historySheetHtml() : ""}${state.runDate ? runSheetHtml() : ""}${nextPreviewHtml()}
+    ${state.sheet ? sheetHtml() : ""}${state.historyDate ? historySheetHtml() : ""}${state.runDate ? runSheetHtml() : ""}${state.planDate ? planSheetHtml() : ""}${nextPreviewHtml()}
     ${restTimerBar()}
   `;
     bind();
@@ -808,14 +819,14 @@ function weekCalendarHtml() {
     <div class="week-cal">
       ${cal.days
         .map((day) => {
-          const cls = ["week-cell", day.kind, day.isToday ? "today" : "", day.isNext ? "next" : ""]
+          const cls = ["week-cell", day.kind, day.isToday ? "today" : "", day.isNext ? "next" : "", day.overridden ? "changed" : ""]
             .filter(Boolean)
             .join(" ");
           const action =
             day.kind === "done"
               ? `data-hist="${day.date}"`
-              : day.kind === "train" && day.isToday
-                ? `data-start="${day.sessionType}"`
+              : !day.isPast
+                ? `data-plan-day="${day.date}"`
                 : day.kind === "run" || day.kind === "rest"
                   ? `data-log-run="${day.date}"`
                   : "";
@@ -830,7 +841,7 @@ function weekCalendarHtml() {
         .join("")}
     </div>
     ${hint}
-    <p class="muted" style="margin-top:8px">月・水・金が基本。連続は避け、間はランか休養です。</p>
+    <p class="muted" style="margin-top:8px">日付をタップすると、休養とトレーニングを入れ替えできます。連続は避けます。</p>
   </section>`;
 }
 
@@ -987,6 +998,41 @@ function weekRunsHtml() {
       )
       .join("")}
   </section>`;
+}
+
+function setDayPlan(date, kind) {
+  const overrides = { ...(load().scheduleOverrides || {}) };
+  if (!kind) delete overrides[date];
+  else overrides[date] = kind;
+  patch({ scheduleOverrides: overrides });
+  refreshCoachPlan();
+}
+
+function planSheetHtml() {
+  const date = state.planDate;
+  if (!date) return "";
+  const cal = (state.coachPlan?.weekSchedule?.days || []).find((d) => d.date === date);
+  const kind = cal?.kind || "rest";
+  const ov = (load().scheduleOverrides || {})[date];
+  const meta = cal?.sessionType ? SESSION_META[cal.sessionType] : null;
+  const nowLabel =
+    kind === "train"
+      ? `${cal.sessionType} ${meta?.name || ""}`
+      : kind === "run"
+        ? "ラン"
+        : "休養";
+  return `<div class="sheet-bg" data-close-plan="1"><div class="sheet" data-stop="1">
+    <button class="sheet-back dark" type="button" data-close-btn="1">‹ 戻る</button>
+    <div class="handle"></div>
+    <div class="kicker" style="margin-top:36px">予定の変更</div>
+    <h2 style="margin-top:6px">${date.replaceAll("-", ".")}（${weekdayJa(date)}）</h2>
+    <p class="muted">いまの予定: ${escapeHtml(nowLabel)}${ov ? "（手動）" : ""}</p>
+    <button class="btn" type="button" data-set-plan="${date}:train" style="margin-top:16px">トレーニングにする</button>
+    <button class="btn ghost" type="button" data-set-plan="${date}:rest" style="margin-top:8px">休養にする</button>
+    <button class="btn ghost" type="button" data-set-plan="${date}:run" style="margin-top:8px">ランにする</button>
+    ${ov ? `<button class="btn ghost" type="button" data-set-plan="${date}:" style="margin-top:8px">自動の予定に戻す</button>` : ""}
+    <button class="btn ghost" type="button" data-log-run="${date}" style="margin-top:8px">Garminの記録を入れる</button>
+  </div></div>`;
 }
 
 function restTimerBar() {
@@ -1266,8 +1312,8 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
-      <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。上の版番号（v30など）を押しても更新できます。</p>
-      <a class="btn" href="./update.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
+      <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。ホーム画面のアプリからだと古い更新ページが残ることがあります。うまくいかないときはSafariで開いてください。</p>
+      <a class="btn" href="./v34.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
     </section>
   `;
 }
@@ -1417,6 +1463,25 @@ function bind() {
       openOverlay("hist", el.dataset.hist);
     })
   );
+  document.querySelectorAll("[data-plan-day]").forEach((el) =>
+    el.addEventListener("click", () => {
+      openOverlay("plan", el.dataset.planDay);
+    })
+  );
+  document.querySelectorAll("[data-set-plan]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const raw = el.dataset.setPlan || "";
+      const date = raw.slice(0, 10);
+      const kind = raw.slice(11);
+      setDayPlan(date, kind || null);
+      closeOverlay();
+    })
+  );
+  document.querySelectorAll("[data-close-plan]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      if (ev.target === el) closeOverlay();
+    })
+  );
   document.querySelectorAll("[data-log-run]").forEach((el) =>
     el.addEventListener("click", () => {
       openOverlay("run", el.dataset.logRun);
@@ -1513,9 +1578,14 @@ function bind() {
 }
 
 function openOverlay(kind, id) {
+  state.sheet = null;
+  state.historyDate = null;
+  state.runDate = null;
+  state.planDate = null;
   if (kind === "sheet") state.sheet = id;
   if (kind === "hist") state.historyDate = id;
   if (kind === "run") state.runDate = id;
+  if (kind === "plan") state.planDate = id;
   history.pushState({ overlay: kind, id }, "");
   render();
 }
@@ -1525,12 +1595,13 @@ function closeOverlay(fromPop = false) {
   state.sheet = null;
   state.historyDate = null;
   state.runDate = null;
+  state.planDate = null;
   render();
   if (shouldGoBack) history.back();
 }
 
 window.addEventListener("popstate", () => {
-  if (state.sheet || state.historyDate || state.runDate) closeOverlay(true);
+  if (state.sheet || state.historyDate || state.runDate || state.planDate) closeOverlay(true);
 });
 
 function historySheetHtml() {
@@ -1752,7 +1823,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-34.js").catch(() => {});
   });
 }
 

@@ -43,7 +43,7 @@ const CoachEngine = {
       weekOf: weeklyPlan.weekOf,
       basedOnDate: last?.date || null,
       basedOnSession: last?.sessionType || null,
-      nextSessionType: nextType,
+      nextSessionType: weekSchedule.nextSessionType || nextType,
       weeklyPlan,
       weeklySummary,
       rulesProfile: rules,
@@ -139,6 +139,9 @@ const CoachEngine = {
       byDate[w.date] = w;
     });
 
+    const overrides = data.scheduleOverrides && typeof data.scheduleOverrides === "object" ? data.scheduleOverrides : {};
+    const blocked = (date) => overrides[date] === "rest" || overrides[date] === "run";
+
     const days = [];
     for (let i = 0; i < 7; i++) {
       const date = this.addDays(weekOf, i);
@@ -155,23 +158,37 @@ const CoachEngine = {
         isNext: false,
         label: "",
         detail: "",
+        overridden: Boolean(overrides[date]),
       });
     }
 
     const doneCount = weekWorkouts.length;
-    let remaining = Math.max(0, target - doneCount);
-    let lastTrain = last?.date || this.addDays(today, -3);
+    days.forEach((day) => {
+      if (day.kind === "done" || day.date < today) return;
+      if (overrides[day.date] === "train") day.kind = "train";
+    });
+    let remaining = Math.max(
+      0,
+      target - doneCount - days.filter((day) => day.kind === "train" && day.date >= today).length
+    );
     const preferred = new Set(["月", "水", "金"]);
-    const canPlace = (date) => {
-      const gap = (this.parseYmd(date) - this.parseYmd(lastTrain)) / 86400000;
-      return gap >= 2;
+    const prevTrainBefore = (date) => {
+      const earlier = days.filter((d) => d.date < date && (d.kind === "train" || d.kind === "done"));
+      const lastEarlier = earlier[earlier.length - 1];
+      return lastEarlier?.date || last?.date || this.addDays(today, -3);
+    };
+    const canPlace = (day) => {
+      if (blocked(day.date) || day.kind !== "open" || day.date < today) return false;
+      const prev = prevTrainBefore(day.date);
+      const gapPrev = (this.parseYmd(day.date) - this.parseYmd(prev)) / 86400000;
+      if (gapPrev < 2) return false;
+      const next = days.find((d) => d.date > day.date && d.kind === "train");
+      if (next && (this.parseYmd(next.date) - this.parseYmd(day.date)) / 86400000 < 2) return false;
+      return true;
     };
     const place = (day) => {
-      if (remaining <= 0 || day.kind !== "open" || day.date < today || !canPlace(day.date)) return false;
+      if (remaining <= 0 || !canPlace(day)) return false;
       day.kind = "train";
-      day.sessionType = upcomingType;
-      upcomingType = rotation[upcomingType] || "A";
-      lastTrain = day.date;
       remaining -= 1;
       return true;
     };
@@ -179,7 +196,15 @@ const CoachEngine = {
     days.filter((day) => preferred.has(day.weekday)).forEach(place);
     days.forEach(place);
 
-    const trainDays = days.filter((day) => day.kind === "train");
+    let typeCursor = upcomingType;
+    days
+      .filter((day) => day.kind === "train")
+      .forEach((day) => {
+        day.sessionType = typeCursor;
+        typeCursor = rotation[typeCursor] || "A";
+      });
+
+    const trainDays = days.filter((day) => day.kind === "train" && day.date >= today);
     if (trainDays[0]) trainDays[0].isNext = true;
     if (trainDays[2]) trainDays[2].optional = true;
 
@@ -187,15 +212,18 @@ const CoachEngine = {
     let nextSessionType = trainDays[0]?.sessionType || upcomingType;
     let nextWeekHint = null;
     if (!nextDate) {
+      const placed = days.filter((d) => d.kind === "train" || d.kind === "done");
+      let lastTrain = placed[placed.length - 1]?.date || last?.date || this.addDays(today, -3);
       let cursor = weekEnd;
       for (let i = 0; i < 8; i++) {
-        if (canPlace(cursor)) {
+        const gap = (this.parseYmd(cursor) - this.parseYmd(lastTrain)) / 86400000;
+        if (gap >= 2 && !blocked(cursor)) {
           nextDate = cursor;
-          nextSessionType = upcomingType;
+          nextSessionType = typeCursor;
           nextWeekHint = {
             date: cursor,
             weekday: "月火水木金土日"[(this.parseYmd(cursor).getDay() + 6) % 7],
-            sessionType: upcomingType,
+            sessionType: typeCursor,
           };
           break;
         }
@@ -217,7 +245,13 @@ const CoachEngine = {
       if (day.kind === "train") {
         const meta = SESSION_META[day.sessionType];
         day.label = `${day.sessionType}${meta?.name || ""}`;
-        day.detail = day.isNext ? "次のトレーニング" : day.optional ? "余裕があれば" : "予定";
+        day.detail = day.overridden
+          ? "希望日に変更"
+          : day.isNext
+            ? "次のトレーニング"
+            : day.optional
+              ? "余裕があれば"
+              : "予定";
         return;
       }
       const run = runMap[day.date];
@@ -228,6 +262,19 @@ const CoachEngine = {
         return;
       }
       const weekend = day.weekday === "土" || day.weekday === "日";
+      const ov = overrides[day.date];
+      if (ov === "run") {
+        day.kind = "run";
+        day.label = "ラン";
+        day.detail = "ラン予定";
+        return;
+      }
+      if (ov === "rest") {
+        day.kind = "rest";
+        day.label = "休養";
+        day.detail = "休養に変更";
+        return;
+      }
       day.kind = weekend ? "run" : "rest";
       day.label = weekend ? "ラン" : "休養";
       day.detail = weekend ? "ランまたは休養" : "休養日";

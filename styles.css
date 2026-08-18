@@ -794,8 +794,12 @@ h3 {
   color: var(--green);
 }
 
-.week-cell.run .wtag {
-  color: var(--blue);
+.week-cell.changed {
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 10, 0.55);
+}
+
+.week-cell.rest .wtag {
+  color: var(--muted);
 }
 
 .link-url {

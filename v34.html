@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <title>Training 更新</title>
+    <meta http-equiv="Pragma" content="no-cache" />
+    <title>Training v34 更新</title>
     <style>
       body {
         margin: 0;
@@ -29,8 +30,7 @@
         color: #8b95a5;
         line-height: 1.6;
       }
-      button,
-      a.btn {
+      button {
         display: block;
         box-sizing: border-box;
         margin-top: 20px;
@@ -43,7 +43,6 @@
         font-size: 17px;
         font-weight: 800;
         text-align: center;
-        text-decoration: none;
       }
       button:disabled {
         opacity: 0.6;
@@ -53,8 +52,8 @@
   <body>
     <main>
       <h1>v34 に更新します</h1>
-      <p>この赤いボタンを押してください。押すまでは画面はそのままです。</p>
-      <p id="msg">古い画面を捨てて、アプリを開き直します。</p>
+      <p>この赤いボタンを押してください。古い画面（v32など）を捨てて、最新のアプリを開き直します。</p>
+      <p id="msg">Safariでこのページを開いているなら、そのままで大丈夫です。</p>
       <button type="button" id="go">更新してアプリを開く</button>
     </main>
     <script>
