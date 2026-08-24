@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 34;
+const APP_VERSION = 35;
 
 const state = {
   view: "today",
@@ -158,7 +158,7 @@ function correctAugust17Weights() {
   ohp.sets.forEach((s) => {
     s.weight = 10;
   });
-  w.review = CoachEngine.reviewSession(
+  w.review = makeReview(
     w,
     workouts.filter((row) => row.date !== w.date)
   );
@@ -190,7 +190,7 @@ function saveEditedWorkout() {
   if (!edited) return;
   const workouts = db().workouts.filter((w) => w.date !== edited.date);
   edited.completed = true;
-  edited.review = CoachEngine.reviewSession(edited, workouts);
+  edited.review = makeReview(edited, workouts);
   workouts.push(edited);
   patch({ workouts });
   refreshCoachPlan();
@@ -312,13 +312,24 @@ function lastWorkout() {
   return all[all.length - 1] || null;
 }
 
+function reviewContext(date) {
+  const meal = (db().meals || []).find((row) => row.date === date) || null;
+  const sleep = (db().sleeps || []).find((row) => row.date === date) || null;
+  const run = (db().runs || []).find((row) => row.date === date && row.done) || null;
+  return { meal, sleep, run };
+}
+
+function makeReview(workout, allWorkouts) {
+  return CoachEngine.reviewSession(workout, allWorkouts, reviewContext(workout.date));
+}
+
 function ensureReviews() {
   const workouts = db().workouts || [];
   let changed = false;
   const next = workouts.map((w) => {
     if (!w.completed || w.review) return w;
     changed = true;
-    return { ...w, review: CoachEngine.reviewSession(w, workouts) };
+    return { ...w, review: makeReview(w, workouts) };
   });
   if (changed) patch({ workouts: next });
 }
@@ -890,10 +901,14 @@ function reviewBlockHtml(review, date) {
     : review
       ? `<p class="muted">${escapeHtml(review.summary)}</p>
          <p class="coach-note"><b>よかった点</b>\n${escapeHtml(review.goods)}\n\n<b>改善点</b>\n${escapeHtml(review.improves)}\n\n<b>前回比</b>\n${escapeHtml(review.vsPrev)}</p>
+         ${review.detail ? `<p class="muted" style="white-space:pre-line">${escapeHtml(review.detail)}</p>` : ""}
+         ${review.lifeNotes?.length ? `<p class="muted">${escapeHtml(review.lifeNotes.join(" "))}</p>` : ""}
          <p class="muted">${escapeHtml(review.next)}</p>`
       : "";
   const wait = "";
-  const ask = "";
+  const ask = review?.shareText
+    ? `<button class="btn ghost" type="button" data-share-review="${date}" style="margin-top:10px">Siri / ChatGPT に渡す文を共有</button>`
+    : "";
   return `<section class="review-card">
     <div class="kicker">${source}</div>
     ${wait}
@@ -931,6 +946,30 @@ function nextPreviewHtml() {
     ${nextBlock}
     <button class="btn" type="button" data-close-preview-btn="1" style="margin-top:16px">OK</button>
   </div></div>`;
+}
+
+async function shareReviewPrompt(date) {
+  const workout = completedWorkouts().find((w) => w.date === date);
+  const text = workout?.review?.shareText;
+  if (!text) return;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: `Training ${date} 振り返り`, text });
+      return;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      alert("振り返り文をコピーしました。SiriやChatGPTに貼り付けてください。");
+      return;
+    }
+  } catch {
+    /* ignore */
+  }
+  prompt("この文をコピーしてSiriやChatGPTに貼り付けてください。", text);
 }
 
 function runCardHtml(date) {
@@ -1442,6 +1481,11 @@ function bind() {
   document.querySelectorAll("[data-edit-workout]").forEach((el) =>
     el.addEventListener("click", () => startEditWorkout(el.dataset.editWorkout))
   );
+  document.querySelectorAll("[data-share-review]").forEach((el) =>
+    el.addEventListener("click", () => {
+      shareReviewPrompt(el.dataset.shareReview);
+    })
+  );
   document.querySelectorAll("[data-save-edit]").forEach((el) => el.addEventListener("click", saveEditedWorkout));
   document.querySelectorAll("[data-cancel-edit]").forEach((el) => el.addEventListener("click", cancelEditWorkout));
   document.querySelectorAll("[data-import-btn]").forEach((el) =>
@@ -1723,7 +1767,7 @@ function finishWorkout() {
   if (!draft) return;
   const completed = { ...draft, completed: true };
   const workouts = db().workouts.filter((w) => w.date !== draft.date);
-  completed.review = CoachEngine.reviewSession(completed, workouts);
+  completed.review = makeReview(completed, workouts);
   workouts.push(completed);
   patch({ workouts, draft: null });
   refreshCoachPlan();

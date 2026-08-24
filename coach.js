@@ -595,28 +595,59 @@ const CoachEngine = {
     return compound.includes(exerciseId) ? 90 : 60;
   },
 
-  reviewSession(workout, allWorkouts = []) {
+  reviewSession(workout, allWorkouts = [], context = {}) {
     const meta = SESSION_META[workout.sessionType] || { name: workout.sessionType, subtitle: "" };
     const analysis = this.analyzeWorkout(workout);
     const prev = [...allWorkouts]
       .filter((w) => w.completed && w.date < workout.date && w.sessionType === workout.sessionType)
       .sort((a, b) => a.date.localeCompare(b.date))
       .pop();
-    const lines = [];
+    const meal = context.meal || null;
+    const sleep = context.sleep || null;
+    const run = context.run || null;
+
+    const exerciseNotes = [];
     workout.exercises.forEach((row) => {
       const ex = EXERCISE_MAP[row.id];
       if (!ex) return;
-      const sets = row.sets.map((s) => (ex.bodyweight ? `${s.reps}回` : `${s.weight}kg×${s.reps}`)).join(" / ");
-      lines.push(`${ex.name}: ${sets}`);
+      const reps = row.sets.map((s) => s.reps);
+      const weights = row.sets.map((s) => s.weight);
+      const label = ex.bodyweight ? `${ex.name} ${reps.join("/")}回` : `${ex.name} ${weights[0]}kg ${reps.join("/")}回`;
+      let tip = "";
+      if (reps.every((r) => r >= ex.repMax)) {
+        tip = ex.bodyweight ? "回数上限到達。次回は丁寧に+1〜2回。" : "上限到達。次回は+2.5kgを検討。";
+      } else if (reps.some((r) => r < ex.repMin)) {
+        tip = "目標回数に届いていない。重量は維持し、フォームと休憩を優先。";
+      } else {
+        const gap = ex.repMax - Math.max(...reps);
+        tip = gap <= 2 ? `あと${gap}回で上限。次セットは休憩${ex.restSec}秒を守る。` : "同重量で回数を積む。";
+      }
+      exerciseNotes.push({ label, tip });
     });
+
     const goods = analysis.progressed.length
       ? `${analysis.progressed.join("、")}は上限回数まで到達。次回は重量アップの候補です。`
-      : "上限到達の種目はまだ少ないので、同じ重量で回数を積みましょう。";
+      : exerciseNotes.length
+        ? `${exerciseNotes[0].label}を軸に、同重量で回数を積みましょう。`
+        : "上限到達の種目はまだ少ないので、同じ重量で回数を積みましょう。";
     const improves = analysis.struggled.length
-      ? `${analysis.struggled.join("、")}は目標回数に届いていません。フォームを優先し、無理に重量を上げない。`
-      : "大きく崩れた種目はありません。";
+      ? `${analysis.struggled.join("、")}は目標回数に届いていません。無理に重量を上げず、セット間の休憩とフォームを優先。`
+      : analysis.maintain.length
+        ? `${analysis.maintain.join("、")}は伸びしろあり。最後の1〜2回の質を意識。`
+        : "大きく崩れた種目はありません。";
+
     let vsPrev = "この種目グループの前回比較データはまだありません。";
+    let volumeDelta = null;
+    const volumeOf = (w) =>
+      w.exercises.reduce((sum, row) => {
+        const ex = EXERCISE_MAP[row.id];
+        if (!ex || ex.bodyweight) return sum;
+        return sum + row.sets.reduce((s, set) => s + set.weight * set.reps, 0);
+      }, 0);
+    const volume = volumeOf(workout);
     if (prev) {
+      const prevVol = volumeOf(prev);
+      volumeDelta = volume - prevVol;
       const diffs = [];
       workout.exercises.forEach((row) => {
         const ex = EXERCISE_MAP[row.id];
@@ -624,26 +655,85 @@ const CoachEngine = {
         if (!ex || !before || ex.bodyweight) return;
         const nowW = row.sets[0]?.weight;
         const oldW = before.sets[0]?.weight;
+        const nowReps = row.sets.reduce((s, set) => s + set.reps, 0);
+        const oldReps = before.sets.reduce((s, set) => s + set.reps, 0);
         if (nowW > oldW) diffs.push(`${ex.name} ${oldW}→${nowW}kg`);
+        else if (nowReps > oldReps) diffs.push(`${ex.name} 総レップ${oldReps}→${nowReps}`);
       });
-      vsPrev = diffs.length ? `前回同セッションより ${diffs.join("、")}。` : "重量は前回と同水準。回数の伸びを見ていきましょう。";
+      vsPrev = diffs.length
+        ? `前回同セッション（${prev.date.slice(5).replace("-", "/")}）より ${diffs.join("、")}。`
+        : volumeDelta > 0
+          ? `前回より総ボリューム+${Math.round(volumeDelta)}kg。回数の伸びが効いています。`
+          : "重量は前回と同水準。回数の伸びを見ていきましょう。";
     }
-    const volume = workout.exercises.reduce((sum, row) => {
-      const ex = EXERCISE_MAP[row.id];
-      if (!ex || ex.bodyweight) return sum;
-      return sum + row.sets.reduce((s, set) => s + set.weight * set.reps, 0);
-    }, 0);
+
+    const lifeNotes = [];
+    if (meal?.protein && meal.protein < PROFILE.proteinTargetG * 0.7) {
+      lifeNotes.push(`タンパク質${meal.protein}gは目安${PROFILE.proteinTargetG}gより少なめ。`);
+    } else if (meal?.protein >= PROFILE.proteinTargetG) {
+      lifeNotes.push(`タンパク質${meal.protein}gは十分。`);
+    }
+    if (sleep?.hours != null && sleep.hours < 6.5) {
+      lifeNotes.push(`睡眠${sleep.hours}時間は短め。次回まで回復を優先。`);
+    }
+    if (run?.km) {
+      lifeNotes.push(`同日ラン${run.km}kmあり。上半身は疲労が残りやすい。`);
+    }
+
     const summary = `${workout.date.replaceAll("-", "/")} の${workout.sessionType}（${meta.name}）を完了。総ボリューム約${Math.round(volume)}kg。`;
     const next = `次回は ${ { A: "B 引く", B: "C 総合", C: "A 押す" }[workout.sessionType] || "次セッション" }。今日はタンパク質と睡眠を優先。`;
+    const detail = exerciseNotes.map((row) => `・${row.label}\n  → ${row.tip}`).join("\n");
+    const lifeLine = lifeNotes.length ? `\n\n生活: ${lifeNotes.join(" ")}` : "";
+
     return {
       summary,
       goods,
       improves,
       vsPrev,
       next,
-      logLines: lines,
+      detail,
+      lifeNotes,
+      logLines: exerciseNotes.map((row) => row.label),
+      volumeKg: Math.round(volume),
+      volumeDelta: volumeDelta != null ? Math.round(volumeDelta) : null,
       source: "local",
       generatedAt: new Date().toISOString(),
+      shareText: this.buildSharePrompt(workout, {
+        summary,
+        goods,
+        improves,
+        vsPrev,
+        next,
+        detail,
+        lifeLine,
+        volumeKg: Math.round(volume),
+      }),
     };
+  },
+
+  buildSharePrompt(workout, review) {
+    const meta = SESSION_META[workout.sessionType] || { name: workout.sessionType };
+    const lines = workout.exercises
+      .map((row) => {
+        const ex = EXERCISE_MAP[row.id];
+        if (!ex) return "";
+        const sets = row.sets.map((s) => (ex.bodyweight ? `${s.reps}回` : `${s.weight}kg×${s.reps}`)).join(" / ");
+        return `- ${ex.name}: ${sets}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+    return (
+      `あなたは自宅筋トレのパーソナルトレーナーです。以下の記録をもとに、具体的な振り返りと次回アドバイスを日本語で書いてください。\n\n` +
+      `【プロフィール】174cm / 目標体脂肪10-12% / 週2-3回上半身+ラン\n` +
+      `【今日】${workout.date} ${workout.sessionType} ${meta.name}\n` +
+      `【記録】\n${lines}\n` +
+      `【端末内コーチの分析】\n` +
+      `総評: ${review.summary}\n` +
+      `よかった点: ${review.goods}\n` +
+      `改善点: ${review.improves}\n` +
+      `前回比: ${review.vsPrev}\n` +
+      `種目別:\n${review.detail}${review.lifeLine || ""}\n\n` +
+      `上記を踏まえ、見出し「総評」「よかった点」「改善点」「次回へ」で、各2文以内にまとめてください。`
+    );
   },
 };
