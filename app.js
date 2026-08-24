@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 35;
+const APP_VERSION = 36;
 
 const state = {
   view: "today",
@@ -76,13 +76,13 @@ function showBootError(err) {
 }
 
 function repairUrl() {
-  return new URL("./v34.html", location.href).href;
+  return new URL("./v36.html", location.href).href;
 }
 
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./v34.html" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./v36.html" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -216,7 +216,9 @@ function restoreMacBackup() {
 }
 
 function needsMacRestore() {
-  return typeof MAC_BACKUP !== "undefined" && !completedWorkouts().some((w) => w.date === "2026-08-17");
+  if (typeof MAC_BACKUP === "undefined") return false;
+  const dates = new Set(completedWorkouts().map((w) => w.date));
+  return !dates.has("2026-08-17") || !dates.has("2026-08-20") || !dates.has("2026-08-23");
 }
 
 function exportBackup() {
@@ -703,7 +705,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./v34.html" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./v36.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -762,10 +764,10 @@ function todayHtml() {
     </section>
     ${needsMacRestore()
       ? `<section class="card accent">
-      <div class="kicker">記録の復元</div>
-      <h2 style="margin-top:8px">8/17 のトレーニングを戻す</h2>
-      <p class="muted">Safariで戻しても、ホーム画面のアプリには別保存です。ここで戻してください。</p>
-      <button class="btn" type="button" data-restore-mac="1">8/17の記録を戻す</button>
+      <div class="kicker">記録の同期</div>
+      <h2 style="margin-top:8px">8/17〜23の記録を入れる</h2>
+      <p class="muted">A・B・Cとラン3回を書き込み、今日からのメニューに反映します。ホーム画面のアプリで押してください。</p>
+      <button class="btn" type="button" data-restore-mac="1">記録を入れてメニュー更新</button>
     </section>`
       : ""}
     ${weekCalendarHtml()}
@@ -1345,14 +1347,15 @@ function lifeHtml() {
     <section class="card">
       <h3>データのバックアップ</h3>
       <p class="muted">記録はiPhoneのこのアプリ内に保存されます。Mac同期はありません。機種変更や再インストールのときだけ、下で書き出し／読み込みできます。</p>
-      <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
+      <button class="btn" type="button" data-restore-mac="1" style="margin-top:12px">8/17〜23の記録を入れてメニュー更新</button>
+      <button class="btn ghost" type="button" data-export="1" style="margin-top:8px">記録を書き出す</button>
       <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
       <input type="file" accept="application/json,.json" data-import-file="1" hidden />
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
       <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。ホーム画面のアプリからだと古い更新ページが残ることがあります。うまくいかないときはSafariで開いてください。</p>
-      <a class="btn" href="./v34.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
+      <a class="btn" href="./v36.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
     </section>
   `;
 }
@@ -1867,7 +1870,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-34.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-36.js").catch(() => {});
   });
 }
 
