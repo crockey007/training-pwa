@@ -181,9 +181,15 @@ const CoachEngine = {
       if (blocked(day.date) || day.kind !== "open" || day.date < today) return false;
       const prev = prevTrainBefore(day.date);
       const gapPrev = (this.parseYmd(day.date) - this.parseYmd(prev)) / 86400000;
-      if (gapPrev < 2) return false;
+      // 月水金は基本日。前日トレでも希望日なら置く（連続注意は recoveryNote で出す）
+      const minGap = preferred.has(day.weekday) ? 1 : 2;
+      if (gapPrev < minGap) return false;
       const next = days.find((d) => d.date > day.date && d.kind === "train");
-      if (next && (this.parseYmd(next.date) - this.parseYmd(day.date)) / 86400000 < 2) return false;
+      if (next) {
+        const gapNext = (this.parseYmd(next.date) - this.parseYmd(day.date)) / 86400000;
+        const nextMin = preferred.has(next.weekday) ? 1 : 2;
+        if (gapNext < Math.min(minGap, nextMin)) return false;
+      }
       return true;
     };
     const place = (day) => {

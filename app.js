@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 36;
+const APP_VERSION = 37;
 
 const state = {
   view: "today",
@@ -76,13 +76,13 @@ function showBootError(err) {
 }
 
 function repairUrl() {
-  return new URL("./v36.html", location.href).href;
+  return new URL("./v37.html", location.href).href;
 }
 
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./v36.html" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./v37.html" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -208,7 +208,12 @@ function cancelEditWorkout() {
 
 function restoreMacBackup() {
   if (typeof MAC_BACKUP === "undefined") return;
-  save(mergeAll(load(), MAC_BACKUP));
+  const merged = mergeAll(load(), MAC_BACKUP);
+  merged.scheduleOverrides = {
+    ...(merged.scheduleOverrides || {}),
+    ...(MAC_BACKUP.scheduleOverrides || {}),
+  };
+  save(merged);
   correctAugust17Weights();
   ensureReviews();
   refreshCoachPlan();
@@ -218,7 +223,11 @@ function restoreMacBackup() {
 function needsMacRestore() {
   if (typeof MAC_BACKUP === "undefined") return false;
   const dates = new Set(completedWorkouts().map((w) => w.date));
-  return !dates.has("2026-08-17") || !dates.has("2026-08-20") || !dates.has("2026-08-23");
+  if (!dates.has("2026-08-17") || !dates.has("2026-08-20") || !dates.has("2026-08-23")) return true;
+  const cal = state.coachPlan?.weekSchedule?.days || [];
+  const todayCal = cal.find((d) => d.date === todayStr());
+  if (todayStr() === "2026-08-24" && todayCal && todayCal.kind !== "train" && todayCal.kind !== "done") return true;
+  return false;
 }
 
 function exportBackup() {
@@ -705,7 +714,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./v36.html" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./v37.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -764,10 +773,10 @@ function todayHtml() {
     </section>
     ${needsMacRestore()
       ? `<section class="card accent">
-      <div class="kicker">記録の同期</div>
-      <h2 style="margin-top:8px">8/17〜23の記録を入れる</h2>
-      <p class="muted">A・B・Cとラン3回を書き込み、今日からのメニューに反映します。ホーム画面のアプリで押してください。</p>
-      <button class="btn" type="button" data-restore-mac="1">記録を入れてメニュー更新</button>
+      <div class="kicker">メニュー修正</div>
+      <h2 style="margin-top:8px">今日をA（押す）にする</h2>
+      <p class="muted">8/23の翌日なので自動では空けていました。押すと今日をトレーニング日にします。</p>
+      <button class="btn" type="button" data-restore-mac="1">今日をトレにして更新</button>
     </section>`
       : ""}
     ${weekCalendarHtml()}
@@ -1355,7 +1364,7 @@ function lifeHtml() {
     <section class="card">
       <h3>アプリの修復</h3>
       <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。ホーム画面のアプリからだと古い更新ページが残ることがあります。うまくいかないときはSafariで開いてください。</p>
-      <a class="btn" href="./v36.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
+      <a class="btn" href="./v37.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
     </section>
   `;
 }
@@ -1870,7 +1879,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-36.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-37.js").catch(() => {});
   });
 }
 

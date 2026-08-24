@@ -3,6 +3,7 @@ const MAC_BACKUP = {
   scheduleOverrides: {
     "2026-08-19": "rest",
     "2026-08-21": "rest",
+    "2026-08-24": "train",
   },
   workouts: [
     {
