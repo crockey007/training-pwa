@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 47;
+const APP_VERSION = 48;
 
 const state = {
   view: "today",
@@ -16,6 +16,9 @@ const state = {
   runDate: null,
   runNotice: "",
   planDate: null,
+  exportText: "",
+  exportNotice: "",
+  importNotice: "",
 };
 
 let syncTimer = null;
@@ -277,14 +280,86 @@ function startBodyLabel() {
   return `${kg}kg / ${fat}%`;
 }
 
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `training-${todayStr()}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+/**
+ * 書き出し。iOSのホーム画面アプリでは a[download] によるダウンロードが
+ * 無視されることが多いので、確実な順に3段構えで試す。
+ *   1. 共有シート（iOSで最も確実。ファイルとして保存・送信できる）
+ *   2. 通常のダウンロード
+ *   3. 画面に本文を出してコピーさせる（何があっても記録を取り出せる最後の砦）
+ */
+async function exportBackup() {
+  const json = JSON.stringify(load(), null, 2);
+  const name = `training-${todayStr()}.json`;
+
+  try {
+    if (navigator.canShare && navigator.share && typeof File === "function") {
+      const file = new File([json], name, { type: "application/json" });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: name });
+        state.exportNotice = "共有シートから保存先を選んでください。";
+        render();
+        return;
+      }
+    }
+  } catch (err) {
+    // キャンセルされた場合もここに来る。下の手段へ進む。
+  }
+
+  try {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    /* 下の手段へ */
+  }
+
+  // ダウンロードが黙って無視されることがあるため、本文も必ず画面に出す
+  state.exportText = json;
+  state.exportNotice = "";
+  render();
+}
+
+async function copyExportText() {
+  const text = state.exportText || "";
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      state.exportNotice = "コピーしました。";
+      render();
+      return;
+    }
+  } catch (err) {
+    /* 下へ */
+  }
+  const el = document.querySelector("[data-export-text]");
+  if (el && el.select) {
+    el.select();
+    state.exportNotice = "全選択しました。長押しして「コピー」を選んでください。";
+    render();
+  }
+}
+
+/** 貼り付けた本文から読み込む。ファイル選択が使えない環境用。 */
+function importFromText(text) {
+  try {
+    const incoming = JSON.parse(String(text || "{}"));
+    if (!incoming || typeof incoming !== "object") throw new Error("invalid");
+    save(mergeAll(load(), incoming));
+    ensureReviews();
+    ensureCoachPlan();
+    state.importNotice = "読み込みました。";
+    state.exportText = "";
+    render();
+  } catch {
+    state.importNotice = "読み込めませんでした。JSONの全文が貼られているか確認してください。";
+    render();
+  }
 }
 
 function importBackupFile(file) {
@@ -1471,6 +1546,20 @@ function lifeHtml() {
       <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
       <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
       <input type="file" accept="application/json,.json" data-import-file="1" hidden />
+      ${state.exportNotice ? `<p class="coach-note" style="margin-top:10px">${escapeHtml(state.exportNotice)}</p>` : ""}
+      ${
+        state.exportText
+          ? `<p class="muted" style="margin-top:12px">保存できない場合はこの本文をコピーして、移行先で「貼り付けて読み込む」に貼ってください。</p>
+             <textarea data-export-text readonly rows="6" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:12px;font-family:ui-monospace,monospace;background:#11151a;color:#f3f5f7;border:1px solid #2a3038;border-radius:10px;padding:10px">${escapeHtml(state.exportText)}</textarea>
+             <button class="btn" type="button" data-copy-export="1" style="margin-top:8px">本文をコピー</button>`
+          : ""
+      }
+      <details style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer">貼り付けて読み込む</summary>
+        <textarea data-import-text rows="6" placeholder="書き出した本文をここに貼り付け" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:12px;font-family:ui-monospace,monospace;background:#11151a;color:#f3f5f7;border:1px solid #2a3038;border-radius:10px;padding:10px"></textarea>
+        <button class="btn ghost" type="button" data-import-text-btn="1" style="margin-top:8px">貼り付けた本文を読み込む</button>
+      </details>
+      ${state.importNotice ? `<p class="coach-note" style="margin-top:10px">${escapeHtml(state.importNotice)}</p>` : ""}
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
@@ -1611,6 +1700,15 @@ function bind() {
   );
   document.querySelectorAll("[data-save-edit]").forEach((el) => el.addEventListener("click", saveEditedWorkout));
   document.querySelectorAll("[data-cancel-edit]").forEach((el) => el.addEventListener("click", cancelEditWorkout));
+  // 書き出しボタンはハンドラが繋がっておらず、押しても何も起きない状態だった
+  document.querySelectorAll("[data-export]").forEach((el) => el.addEventListener("click", exportBackup));
+  document.querySelectorAll("[data-copy-export]").forEach((el) => el.addEventListener("click", copyExportText));
+  document.querySelectorAll("[data-import-text-btn]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const box = document.querySelector("[data-import-text]");
+      importFromText(box ? box.value : "");
+    })
+  );
   document.querySelectorAll("[data-import-btn]").forEach((el) =>
     el.addEventListener("click", () => document.querySelector("[data-import-file]")?.click())
   );
@@ -2021,7 +2119,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-47.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-48.js").catch(() => {});
   });
 }
 
