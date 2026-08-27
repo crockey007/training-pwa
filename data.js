@@ -1,12 +1,46 @@
 const PROFILE = {
-  heightCm: 174,
-  startWeightKg: 68.5,
-  startBodyFat: 18,
+  // 公開版では個人の身体データを持たない。実際の値は端末内の記録から読む。
+  // ここの数値は記録が1件も無いときだけ使われる中立な初期値。
+  startWeightKg: 70,
+  startBodyFat: 20,
   proteinTargetG: 130,
   startDate: "2026-08-17",
   barKg: 10,
   weeklyTrainingMin: 2,
   weeklyTrainingMax: 3,
+  marathonDate: "2026-12-13",
+  marathonGoal: "sub4",
+  weeklyRunTarget: 3,
+  physiqueGoal: "胸・肩・背中の筋量を保ちながら体脂肪10〜12%",
+};
+
+const RUN_PLAN = {
+  marathonKm: 42.195,
+  goals: {
+    sub5: { seconds: 5 * 3600, label: "サブ5" },
+    sub430: { seconds: 4.5 * 3600, label: "サブ4.5" },
+    sub4: { seconds: 4 * 3600, label: "サブ4" },
+    sub330: { seconds: 3.5 * 3600, label: "サブ3.5" },
+  },
+  // 曜日ごとの基本メニュー。実績と残り週数からペース・距離を毎回計算する。
+  weekly: {
+    火: "tempo",
+    木: "easy",
+    土: "long",
+  },
+  types: {
+    tempo: { label: "テンポ走", note: "閾値。きついが会話は途切れる程度" },
+    easy: { label: "Eラン", note: "会話できる強度。無理に上げない" },
+    long: { label: "ロング", note: "ゆっくり長く。距離を優先" },
+  },
+  // 距離の設計（km）
+  longStartKm: 10,
+  longPeakKm: 30,
+  taperFrom: 0.8, // 進捗80%以降はテーパー
+  tempoStartKm: 3,
+  tempoPeakKm: 8,
+  easyMinKm: 5,
+  easyMaxKm: 8,
 };
 
 const SESSION_META = {
@@ -21,9 +55,9 @@ const SESSION_META = {
     focus: "背中の幅と腕のライン",
   },
   C: {
-    name: "総合",
-    subtitle: "弱点＋腕・腹筋",
-    focus: "全体のバランスと腹筋",
+    name: "ランナー補強",
+    subtitle: "脚・臀部・ふくらはぎ・体幹",
+    focus: "故障しにくい脚と体幹、上半身の姿勢維持",
   },
 };
 
@@ -423,6 +457,67 @@ const EXERCISES = [
     ],
   },
   {
+    id: "back-squat",
+    name: "バーベル・バックスクワット",
+    muscle: "臀部・大腿四頭筋・体幹",
+    category: "legs",
+    equipment: "ラック・バーベル・セーフティバー",
+    sets: 2,
+    repMin: 6,
+    repMax: 10,
+    incrementKg: 2.5,
+    startWeight: 20,
+    restSec: 150,
+    setup: [
+      "Jカップを胸上部の高さ、セーフティバーをしゃがんだ最下点の少し下に設定する。",
+      "バーを僧帽筋上部に載せ、肩幅程度で握る。首の骨へ直接載せない。",
+      "最初はバーだけで深さと安定性を確認する。",
+    ],
+    form: [
+      "息を吸って腹圧を作り、膝と股関節を同時に曲げる。",
+      "膝はつま先と同じ方向へ動かし、足裏全体を床につける。",
+      "腰が丸まらない深さから立ち上がる。限界まで追い込まない。",
+    ],
+    mistakes: ["膝が内側へ入る。", "腰が丸まる深さまで無理にしゃがむ。", "セーフティバーを使わない。"],
+  },
+  {
+    id: "romanian-deadlift",
+    name: "ルーマニアンデッドリフト",
+    muscle: "ハムストリング・臀部・背面",
+    category: "legs",
+    equipment: "バーベル",
+    sets: 2,
+    repMin: 8,
+    repMax: 12,
+    incrementKg: 2.5,
+    startWeight: 20,
+    restSec: 120,
+    setup: ["肩幅で立ち、バーを腿の前で持つ。", "膝は軽く曲げ、背中を自然な直線に保つ。"],
+    form: [
+      "お尻を後ろへ引き、バーを脚に沿わせて下ろす。",
+      "ハムストリングが伸びた位置で止め、床まで下ろすことを目的にしない。",
+      "床を押して臀部を締めながら立つ。",
+    ],
+    mistakes: ["背中を丸めてバーを下げる。", "スクワットのように膝を深く曲げる。", "バーを脚から離す。"],
+  },
+  {
+    id: "calf-raise",
+    name: "スタンディング・カーフレイズ",
+    muscle: "ふくらはぎ・足首",
+    category: "legs",
+    equipment: "床・ラック（支持用）・プレート任意",
+    sets: 2,
+    repMin: 12,
+    repMax: 20,
+    incrementKg: 2.5,
+    startWeight: 0,
+    restSec: 60,
+    bodyweight: true,
+    setup: ["ラックに軽く手を添え、足を腰幅にする。", "まず両脚自重。余裕が出たら片脚またはプレートを追加する。"],
+    form: ["かかとをゆっくり上げ、最上部で1秒止める。", "反動を使わず、ゆっくり下ろす。"],
+    mistakes: ["小刻みに跳ねる。", "足首が外側へ崩れる。", "痛みを我慢して続ける。"],
+  },
+  {
     id: "core",
     name: "コアサーキット",
     muscle: "腹筋・腹斜筋",
@@ -464,6 +559,9 @@ const CUES = {
   "pull-up": ["胸をバーへ近づける", "肩をすくめない", "反動は最小限"],
   "seated-row": ["背中を丸めない", "肘を腰の横へ", "肩を下げてから引く"],
   "barbell-row": ["腰を丸めない", "バーはお腹へ", "肩甲骨を寄せる"],
+  "back-squat": ["腹圧を作る", "膝とつま先は同方向", "限界まで追い込まない"],
+  "romanian-deadlift": ["お尻を後ろへ", "バーは脚に沿わせる", "背中を丸めない"],
+  "calf-raise": ["最上部で1秒", "反動を使わない", "ゆっくり下ろす"],
   "barbell-curl": ["肘の位置は固定", "振らない", "下ろすのもゆっくり"],
   "face-pull": ["肘を高く開く", "重量は軽め", "肩をすくめない"],
   "side-raise": ["肩の高さまで", "振らずに上げる", "耳と肩の距離を保つ"],

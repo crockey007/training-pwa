@@ -52,8 +52,8 @@
   </head>
   <body>
     <main>
-      <h1>v34 に更新します</h1>
-      <p>この赤いボタンを押してください。押すまでは画面はそのままです。</p>
+      <h1>v47 に更新します</h1>
+      <p>ランのペース提案を追加し、オフラインでも起動できるようにします。</p>
       <p id="msg">古い画面を捨てて、アプリを開き直します。</p>
       <button type="button" id="go">更新してアプリを開く</button>
     </main>
@@ -80,7 +80,7 @@
         await new Promise(function (resolve) { setTimeout(resolve, 1200); });
         var dest = new URL("./index.html", location.href);
         dest.searchParams.set("t", String(Date.now()));
-        dest.searchParams.set("v", "34");
+        dest.searchParams.set("v", "47");
         location.replace(dest.href);
       }
       document.getElementById("go").addEventListener("click", refreshApp);

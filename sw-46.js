@@ -1,4 +1,4 @@
-const CACHE = "home-gym-v47";
+const CACHE = "home-gym-v46";
 const SHELL = [
   "./index.html",
   "./app.js",
@@ -40,19 +40,7 @@ function fallbackResponse() {
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  // addAll() は1つでも失敗すると全部が保存されない全か無かの動作。
-  // 1ファイルの取りこぼしでオフライン起動ごと失うのは割に合わないので、個別に保存する。
-  event.waitUntil(
-    caches.open(CACHE).then((cache) =>
-      Promise.all(
-        SHELL.map((path) =>
-          fetch(path, { cache: "no-store" })
-            .then((res) => (res && res.ok ? cache.put(path, res) : null))
-            .catch(() => null)
-        )
-      )
-    )
-  );
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL).catch(() => {})));
 });
 
 self.addEventListener("activate", (event) => {

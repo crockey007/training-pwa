@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 37;
+const APP_VERSION = 47;
 
 const state = {
   view: "today",
@@ -76,13 +76,13 @@ function showBootError(err) {
 }
 
 function repairUrl() {
-  return new URL("./v37.html", location.href).href;
+  return new URL("./update.html", location.href).href;
 }
 
 function repairLinkHtml(label) {
   const url = repairUrl();
   const text = label || url;
-  return `<a href="./v37.html" class="link-url">${escapeHtml(text)}</a>`;
+  return `<a href="./update.html" class="link-url">${escapeHtml(text)}</a>`;
 }
 
 function scheduleSync() {
@@ -123,6 +123,8 @@ function mergeAll(local, remote) {
     weights: mergeByDate(localOk.weights, remoteOk.weights),
     runs: mergeByDate(localOk.runs, remoteOk.runs),
     scheduleOverrides: { ...(remoteOk.scheduleOverrides || {}), ...(localOk.scheduleOverrides || {}) },
+    programVersion: Math.max(Number(localOk.programVersion || 0), Number(remoteOk.programVersion || 0)),
+    marathonGoal: localOk.marathonGoal || remoteOk.marathonGoal || null,
     draft: localOk.draft && localOk.draft.date === todayStr() ? localOk.draft : remoteOk.draft ?? localOk.draft,
     profileStartDate: localOk.profileStartDate || remoteOk.profileStartDate || PROFILE.startDate,
     pendingSync: false,
@@ -220,14 +222,59 @@ function restoreMacBackup() {
   render();
 }
 
+function restoreKnownHistoryIfNeeded() {
+  if (typeof MAC_BACKUP === "undefined") return;
+  const current = load();
+  const knownDates = new Set((current.workouts || []).map((w) => w.date));
+  const missingWorkout = ["2026-08-17", "2026-08-20", "2026-08-23"].some((date) => !knownDates.has(date));
+  const missingBody = !(current.weights || []).some((row) => row.date === "2026-08-17");
+  const missingRuns = (current.runs || []).filter((row) => row.done || row.km > 0).length < 3;
+  if (!missingWorkout && !missingBody && !missingRuns) return;
+  const merged = mergeAll(current, MAC_BACKUP);
+  merged.scheduleOverrides = {
+    ...(merged.scheduleOverrides || {}),
+    ...(MAC_BACKUP.scheduleOverrides || {}),
+  };
+  save(merged);
+}
+
 function needsMacRestore() {
   if (typeof MAC_BACKUP === "undefined") return false;
   const dates = new Set(completedWorkouts().map((w) => w.date));
   if (!dates.has("2026-08-17") || !dates.has("2026-08-20") || !dates.has("2026-08-23")) return true;
   const cal = state.coachPlan?.weekSchedule?.days || [];
   const todayCal = cal.find((d) => d.date === todayStr());
-  if (todayStr() === "2026-08-24" && todayCal && todayCal.kind !== "train" && todayCal.kind !== "done") return true;
   return false;
+}
+
+function migrateProgramV39() {
+  const data = load();
+  if (Number(data.programVersion || 0) >= 39) return;
+  data.scheduleOverrides = {
+    ...(data.scheduleOverrides || {}),
+    "2026-08-24": "rest",
+    "2026-08-25": "run",
+    "2026-08-26": "train",
+    "2026-08-27": "train",
+    "2026-08-28": "duty",
+    "2026-08-29": "travel",
+    "2026-08-30": "run",
+  };
+  data.programVersion = 39;
+  data.marathonGoal = { date: "2026-12-13", target: "sub4", weeklyRuns: 3 };
+  save(data);
+}
+
+/**
+ * 「開始時」は実際の最初の記録から出す。PROFILE の値は記録が1件も無いときの
+ * 保険でしかない（公開版では個人の数値を持たないため、ここを固定値にできない）。
+ */
+function startBodyLabel() {
+  const rows = (db().weights || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  const first = rows.find((r) => r.kg || r.bodyFat);
+  const kg = first?.kg ?? PROFILE.startWeightKg;
+  const fat = first?.bodyFat ?? PROFILE.startBodyFat;
+  return `${kg}kg / ${fat}%`;
 }
 
 function exportBackup() {
@@ -392,9 +439,9 @@ function nextSessionType() {
 function sessionExercises(type) {
   const plan = state.coachPlan;
   if (plan && plan.nextSessionType === type && plan.exercises?.length) return plan.exercises;
-  if (type === "A") return ["bench-press", "incline-press", "ohp", "pushdown", "bench-dip"];
-  if (type === "B") return ["lat-pulldown", "seated-row", "barbell-row", "barbell-curl", "face-pull"];
-  return [weakerBetween("bench-press", "incline-press"), pickBack(), "side-raise", "oh-tricep", "hammer-curl", "core"];
+  if (type === "A") return ["bench-press", "incline-press", "ohp", "side-raise", "pushdown"];
+  if (type === "B") return [pickBack(), "barbell-row", "seated-row", "face-pull", "barbell-curl"];
+  return ["back-squat", "romanian-deadlift", "calf-raise", "face-pull", "hammer-curl", "core"];
 }
 
 function sessionFocus(type) {
@@ -427,9 +474,10 @@ function recommend(exercise) {
       reason: `開始重量の目安です（バー${PROFILE.barKg}kgを含む総重量）。最初は${exercise.repMin}回を綺麗に。`,
     };
   }
-  const weight = last.sets[0].weight;
-  const hitMax = last.sets.every((set) => set.reps >= exercise.repMax);
-  const missMin = last.sets.some((set) => set.reps < exercise.repMin);
+  const weight = Math.max(...last.sets.map((set) => Number(set.weight) || 0));
+  const workSets = last.sets.filter((set) => Number(set.weight) === weight);
+  const hitMax = workSets.every((set) => set.reps >= exercise.repMax);
+  const missMin = workSets.some((set) => set.reps < exercise.repMin);
   if (hitMax) {
     return {
       weight: roundStep(weight + exercise.incrementKg, exercise.incrementKg || 2.5),
@@ -446,7 +494,7 @@ function recommend(exercise) {
   }
   return {
     weight,
-    reps: Math.min(exercise.repMax, Math.max(...last.sets.map((s) => s.reps))),
+    reps: Math.min(exercise.repMax, Math.max(...workSets.map((s) => s.reps))),
     reason: "前回の重量を維持。回数を上限に近づけましょう。",
   };
 }
@@ -458,7 +506,7 @@ function roundStep(value, step) {
 }
 
 function emptySets(exercise, rec) {
-  return Array.from({ length: exercise.sets }, () => ({
+  return Array.from({ length: rec.sets || exercise.sets }, () => ({
     weight: rec.weight,
     reps: rec.reps,
   }));
@@ -493,8 +541,40 @@ function todayRun(date = todayStr()) {
       done: false,
       km: 0,
       kcal: 0,
+      durationSec: 0,
     }
   );
+}
+
+/** 「34:11」「1:02:30」「34」（分）を秒に変換する。 */
+function parseDuration(text) {
+  const s = String(text || "").trim();
+  if (!s) return 0;
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (m) {
+    return m[3] !== undefined
+      ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+      : Number(m[1]) * 60 + Number(m[2]);
+  }
+  const n = Number(s.replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 60) : 0;
+}
+
+function fmtDuration(sec) {
+  const s = Math.max(0, Math.round(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
+}
+
+function runPaceText(km, durationSec) {
+  const d = Number(durationSec) || 0;
+  const k = Number(km) || 0;
+  if (k <= 0 || d <= 0) return "";
+  const sec = Math.round(d / k);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}/km`;
 }
 
 function proteinOptions() {
@@ -714,7 +794,7 @@ function render() {
   app.innerHTML = `
     <header class="topbar">
       <h1>${title}</h1>
-      <div class="sub">${sub} · <a href="./v37.html" class="link-url">v${APP_VERSION}</a></div>
+      <div class="sub">${sub} · <a href="./update.html" class="link-url">v${APP_VERSION}</a></div>
       ${canSync() ? `<div class="sync-pill ${state.syncStatus}">${syncLabel}</div>` : ""}
     </header>
     <main class="page">${viewHtml()}</main>
@@ -776,7 +856,7 @@ function todayHtml() {
       <div class="kicker">メニュー修正</div>
       <h2 style="margin-top:8px">今日をA（押す）にする</h2>
       <p class="muted">8/23の翌日なので自動では空けていました。押すと今日をトレーニング日にします。</p>
-      <button class="btn" type="button" data-restore-mac="1">今日をトレにして更新</button>
+      <button class="btn" type="button" data-restore-mac="1">過去の記録を復元</button>
     </section>`
       : ""}
     ${weekCalendarHtml()}
@@ -863,7 +943,7 @@ function weekCalendarHtml() {
         .join("")}
     </div>
     ${hint}
-    <p class="muted" style="margin-top:8px">日付をタップすると、休養とトレーニングを入れ替えできます。連続は避けます。</p>
+      <p class="muted" style="margin-top:8px">サブ4に向けてラン3回・筋トレ3回・完全休養1回。日付タップで当直日に合わせて変更できます。</p>
   </section>`;
 }
 
@@ -983,6 +1063,25 @@ async function shareReviewPrompt(date) {
   prompt("この文をコピーしてSiriやChatGPTに貼り付けてください。", text);
 }
 
+/** その日に処方されたラン種別（tempo / easy / long）。基準ペースの算出に使う。 */
+function runTypeFor(date) {
+  const day = (state.coachPlan?.weekSchedule?.days || []).find((d) => d.date === date);
+  return day?.runTarget?.type || "";
+}
+
+function runTargetHtml(date) {
+  const day = (state.coachPlan?.weekSchedule?.days || []).find((d) => d.date === date);
+  const target = day?.runTarget;
+  if (!target) return "";
+  const plan = state.coachPlan?.runPlan;
+  return `<div class="coach-note" style="margin-top:10px">
+    <strong>メニュー: ${escapeHtml(target.label)}</strong>
+    <div style="margin-top:4px">${escapeHtml(target.detail)}</div>
+    <div class="muted" style="margin-top:6px">${escapeHtml(target.reason || "")}</div>
+    ${plan ? `<div class="muted" style="margin-top:6px">${escapeHtml(plan.note)}</div>` : ""}
+  </div>`;
+}
+
 function runCardHtml(date) {
   const run = todayRun(date);
   const isToday = date === todayStr();
@@ -992,9 +1091,10 @@ function runCardHtml(date) {
         <div class="kicker">ラン · Garmin</div>
         <h3>${isToday ? "今日のラン" : date.replaceAll("-", ".") + " のラン"}</h3>
       </div>
-      <span class="muted">${run.done && (run.km || run.kcal) ? `${run.km || 0}km · ${run.kcal || 0}kcal` : run.done ? "数字を入れて保存" : "未記録"}</span>
+      <span class="muted">${run.done && (run.km || run.kcal) ? `${run.km || 0}km${runPaceText(run.km, run.durationSec) ? " · " + runPaceText(run.km, run.durationSec) : ` · ${run.kcal || 0}kcal`}` : run.done ? "数字を入れて保存" : "未記録"}</span>
     </div>
-    <p class="muted">走った日は「ランした」を選んで、Garminの距離と消費カロリーを入れてください。</p>
+    ${runTargetHtml(date)}
+    <p class="muted">走った日は「ランした」を選んで、Garminの距離・タイム・消費カロリーを入れてください。</p>
     <div class="pills" style="margin-top:10px">
       <button class="pill ${!run.done ? "active" : ""}" type="button" data-run-done="${date}:0">やっていない</button>
       <button class="pill good ${run.done ? "active" : ""}" type="button" data-run-done="${date}:1">ランした</button>
@@ -1008,12 +1108,19 @@ function runCardHtml(date) {
           <input class="num-input" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" value="${run.km || ""}" data-run-km="${date}" placeholder="例 5.20" />
         </div>
         <div>
+          <div class="metric-label">タイム</div>
+          <input class="num-input" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" value="${run.durationSec ? fmtDuration(run.durationSec) : ""}" data-run-time="${date}" placeholder="例 34:11" />
+          <div class="muted" style="margin-top:6px" data-pace-out="${date}">${
+            runPaceText(run.km, run.durationSec) ? "ペース " + runPaceText(run.km, run.durationSec) : "距離とタイムでペース計算"
+          }</div>
+        </div>
+        <div>
           <div class="metric-label">消費カロリー</div>
           ${stepperHtml(`run-kcal:${date}`, Number(run.kcal) || 0, "")}
           <input class="num-input" type="text" inputmode="numeric" enterkeyhint="done" autocomplete="off" autocorrect="off" spellcheck="false" value="${run.kcal || ""}" data-run-kcal="${date}" placeholder="例 320" />
         </div>
       </div>
-      <p class="muted" style="margin-top:8px">±でも、Garminの数字を直接入力しても大丈夫です。</p>
+      <p class="muted" style="margin-top:8px">±でも、Garminの数字を直接入力しても大丈夫です。タイムは 34:11 のように入れてください。</p>
       ${state.runNotice ? `<p class="coach-note" style="margin-top:10px">${escapeHtml(state.runNotice)}</p>` : ""}
       <button class="btn" type="button" data-save-run="${date}" style="margin-top:12px">ランを保存</button>`
         : ""
@@ -1043,7 +1150,7 @@ function weekRunsHtml() {
         (r) => `<div class="body-log-row">
         <span>${r.date.replaceAll("-", ".")} ${weekdayJa(r.date)}</span>
         <span>${r.km || 0}km</span>
-        <span>${r.kcal || 0}kcal</span>
+        <span>${runPaceText(r.km, r.durationSec) || `${r.kcal || 0}kcal`}</span>
       </div>`
       )
       .join("")}
@@ -1288,7 +1395,7 @@ function lifeHtml() {
   return `
     <section class="card">
       <div class="row"><h3>今日の体重・体脂肪</h3><span class="muted">${body.saved ? "今日記録済" : "未記録"}</span></div>
-      <p class="muted">±で直す数値は<strong>今日</strong>の記録です。開始時（${PROFILE.startWeightKg}kg / ${PROFILE.startBodyFat}%）は変わりません。</p>
+      <p class="muted">±で直す数値は<strong>今日</strong>の記録です。開始時（${startBodyLabel()}）は変わりません。</p>
       <div class="metric-grid">
         <div>
           <div class="metric-label">今日の体重</div>
@@ -1355,16 +1462,20 @@ function lifeHtml() {
     </section>
     <section class="card">
       <h3>データのバックアップ</h3>
-      <p class="muted">記録はiPhoneのこのアプリ内に保存されます。Mac同期はありません。機種変更や再インストールのときだけ、下で書き出し／読み込みできます。</p>
-      <button class="btn" type="button" data-restore-mac="1" style="margin-top:12px">8/17〜23の記録を入れてメニュー更新</button>
-      <button class="btn ghost" type="button" data-export="1" style="margin-top:8px">記録を書き出す</button>
+      <p class="muted">記録はiPhoneのこのアプリ内に保存されます。Mac同期はありません。機種変更・再インストール・URL変更のときは、下で書き出し／読み込みしてください。</p>
+      ${
+        typeof MAC_BACKUP !== "undefined"
+          ? `<button class="btn" type="button" data-restore-mac="1" style="margin-top:12px">8/17〜23の記録を復元</button>`
+          : ""
+      }
+      <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
       <button class="btn ghost" type="button" data-import-btn="1" style="margin-top:8px">記録を読み込む</button>
       <input type="file" accept="application/json,.json" data-import-file="1" hidden />
     </section>
     <section class="card">
       <h3>アプリの修復</h3>
       <p class="muted">画面の版が古いまま、白い画面、更新されないときはこちら。ホーム画面のアプリからだと古い更新ページが残ることがあります。うまくいかないときはSafariで開いてください。</p>
-      <a class="btn" href="./v37.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
+      <a class="btn" href="./update.html" style="display:block;text-align:center;margin-top:12px;text-decoration:none">最新版に更新する</a>
     </section>
   `;
 }
@@ -1548,12 +1659,20 @@ function bind() {
       const [date, flag] = el.dataset.runDone.split(":");
       const done = flag === "1";
       const current = todayRun(date);
-      upsertByDate("runs", { ...current, date, done, km: done ? current.km : 0, kcal: done ? current.kcal : 0 });
+      upsertByDate("runs", {
+        ...current,
+        date,
+        done,
+        km: done ? current.km : 0,
+        kcal: done ? current.kcal : 0,
+        durationSec: done ? current.durationSec || 0 : 0,
+        type: done ? current.type || runTypeFor(date) : "",
+      });
       refreshCoachPlan();
       render();
     })
   );
-  document.querySelectorAll("[data-run-km], [data-run-kcal]").forEach((el) => {
+  document.querySelectorAll("[data-run-km], [data-run-kcal], [data-run-time]").forEach((el) => {
     el.addEventListener("click", (ev) => ev.stopPropagation());
     el.addEventListener("touchstart", (ev) => ev.stopPropagation(), { passive: true });
     el.addEventListener("focus", () => {
@@ -1566,13 +1685,28 @@ function bind() {
       }, 300);
     });
     el.addEventListener("change", () => {
-      const date = el.dataset.runKm || el.dataset.runKcal;
+      const date = el.dataset.runKm || el.dataset.runKcal || el.dataset.runTime;
       const run = todayRun(date);
       const kmEl = document.querySelector(`[data-run-km="${date}"]`);
       const kcalEl = document.querySelector(`[data-run-kcal="${date}"]`);
+      const timeEl = document.querySelector(`[data-run-time="${date}"]`);
       const km = kmEl ? Math.max(0, Number(String(kmEl.value).replace(",", ".")) || 0) : run.km || 0;
       const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : run.kcal || 0;
-      upsertByDate("runs", { ...run, date, done: true, km: roundStep(km, 0.01), kcal });
+      const durationSec = timeEl ? parseDuration(timeEl.value) : run.durationSec || 0;
+      upsertByDate("runs", {
+        ...run,
+        date,
+        done: true,
+        km: roundStep(km, 0.01),
+        kcal,
+        durationSec,
+        type: run.type || runTypeFor(date),
+      });
+      const out = document.querySelector(`[data-pace-out="${date}"]`);
+      if (out) {
+        const pace = runPaceText(km, durationSec);
+        out.textContent = pace ? `ペース ${pace}` : "距離とタイムでペース計算";
+      }
     });
   });
   document.querySelectorAll("[data-save-run]").forEach((el) =>
@@ -1581,11 +1715,17 @@ function bind() {
       const root = el.closest("section") || document;
       const kmEl = root.querySelector("[data-run-km]");
       const kcalEl = root.querySelector("[data-run-kcal]");
+      const timeEl = root.querySelector("[data-run-time]");
       const km = kmEl ? Math.max(0, Number(String(kmEl.value).replace(",", ".")) || 0) : 0;
       const kcal = kcalEl ? Math.max(0, Math.round(Number(kcalEl.value) || 0)) : 0;
-      upsertByDate("runs", { date, done: true, km: roundStep(km, 0.01), kcal });
+      const durationSec = timeEl ? parseDuration(timeEl.value) : 0;
+      upsertByDate("runs", { date, done: true, km: roundStep(km, 0.01), kcal, durationSec, type: runTypeFor(date) });
       refreshCoachPlan();
-      state.runNotice = km || kcal ? `保存しました ${km || 0}km · ${kcal || 0}kcal` : "距離かカロリーを入れてから保存してください";
+      const savedPace = runPaceText(km, durationSec);
+      state.runNotice =
+        km || kcal
+          ? `保存しました ${km || 0}km${savedPace ? " · " + savedPace : ` · ${kcal || 0}kcal`}`
+          : "距離かカロリーを入れてから保存してください";
       if (state.runDate) {
         closeOverlay();
         return;
@@ -1854,6 +1994,8 @@ async function onAppVisible() {
 }
 
 function bootstrap() {
+  restoreKnownHistoryIfNeeded();
+  migrateProgramV39();
   state.coachPlan = load().coachPlan || null;
   try {
     correctAugust17Weights();
@@ -1879,7 +2021,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-37.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-47.js").catch(() => {});
   });
 }
 
