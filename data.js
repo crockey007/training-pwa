@@ -43,6 +43,37 @@ const RUN_PLAN = {
   easyMaxKm: 8,
 };
 
+/**
+ * セッションごとの「必ずやる種目（core）」と「入れ替える候補（pool）」。
+ * pool からは、しばらくやっていない種目を優先して選ぶ。これで固定メニューにならず、
+ * 同じ部位ばかり続いたり、特定の種目が抜け落ちたままになるのを防ぐ。
+ * category は順番決めの回復判定に使う（同系統を連日やらない）。
+ */
+const SESSION_PLAN = {
+  A: {
+    category: "push",
+    core: ["bench-press"],
+    pool: ["incline-press", "ohp", "side-raise", "pushdown", "oh-tricep", "bench-dip"],
+    size: 5,
+  },
+  B: {
+    category: "pull",
+    // 1種目めは懸垂かラットプルを実力で選ぶため coach.js 側で決める
+    core: ["barbell-row"],
+    // 引く系の補助はBに集約する。Cと共有すると常にCで消化され、Bで一度も選ばれなくなる。
+    pool: ["seated-row", "barbell-curl", "face-pull", "hammer-curl"],
+    size: 5,
+  },
+  C: {
+    category: "legs",
+    core: ["back-squat"],
+    // 脚の種目はカタログに3つしか無いため、Cは実質固定になる（入れ替える候補が無い）。
+    // ランとの両立を優先する短時間セッションでもあるので4種目に留める。
+    pool: ["romanian-deadlift", "calf-raise", "core"],
+    size: 4,
+  },
+};
+
 const SESSION_META = {
   A: {
     name: "押す",

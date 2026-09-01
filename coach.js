@@ -20,7 +20,15 @@ const CoachEngine = {
     const analysis = last ? this.analyzeWorkout(last) : null;
     const body = this.analyzeBody(weights);
     const nutrition = this.analyzeNutrition(meals);
-    const nextType = this.nextSessionType(last, weeklyPlan);
+    // 次にやる日と、その日に手動指定があるかを先に決める。
+    // 指定があればローテーションより優先する。
+    const planDate = this.buildWeekSchedule(data, "A").nextDate || this.fmtDate(new Date());
+    const sessionOverride = (data.sessionOverrides || {})[planDate];
+    const nextType = this.nextSessionType(last, weeklyPlan, {
+      workouts,
+      forDate: planDate,
+      override: sessionOverride,
+    });
     const weeklySession = weeklyPlan.sessions[nextType] || weeklyPlan.sessions.A;
     const exercises = this.microAdjustExercises(nextType, weeklySession.exercises || [], { lastLog, analysis, workouts, rules });
     const targets = {};
@@ -80,19 +88,12 @@ const CoachEngine = {
       return null;
     };
     const weekWorkouts = workouts.filter((w) => w.date >= weekOf);
+    const planDate = this.buildWeekSchedule(data, null).nextDate || this.fmtDate(new Date());
+    const exCtx = { lastLog, workouts, rules, forDate: planDate };
     const sessions = {
-      A: {
-        focus: SESSION_META.A.focus,
-        exercises: this.baseExercises("A", { lastLog, workouts, rules }),
-      },
-      B: {
-        focus: SESSION_META.B.focus,
-        exercises: this.baseExercises("B", { lastLog, workouts, rules }),
-      },
-      C: {
-        focus: SESSION_META.C.focus,
-        exercises: this.baseExercises("C", { lastLog, workouts, rules }),
-      },
+      A: { focus: SESSION_META.A.focus, exercises: this.baseExercises("A", exCtx) },
+      B: { focus: SESSION_META.B.focus, exercises: this.baseExercises("B", exCtx) },
+      C: { focus: SESSION_META.C.focus, exercises: this.baseExercises("C", exCtx) },
     };
     const completedTypes = weekWorkouts.map((w) => w.sessionType);
     const coachNote = this.buildWeeklyNote({ rules, body, weekWorkouts, completedTypes });
@@ -210,12 +211,19 @@ const CoachEngine = {
     days.filter((day) => preferred.has(day.weekday)).forEach(place);
     days.forEach(place);
 
-    let typeCursor = upcomingType;
+    // 先の予定も固定ローテーションではなく、その日時点で最も間隔が空く種別を選ぶ。
+    // 手動指定（sessionOverrides）があればそれを優先する。
+    const sessionOverrides =
+      data.sessionOverrides && typeof data.sessionOverrides === "object" ? data.sessionOverrides : {};
+    const simulated = workouts.map((w) => ({ date: w.date, sessionType: w.sessionType, completed: true }));
     days
       .filter((day) => day.kind === "train")
-      .forEach((day) => {
-        day.sessionType = typeCursor;
-        typeCursor = rotation[typeCursor] || "A";
+      .forEach((day, i) => {
+        const ov = sessionOverrides[day.date];
+        const picked = ov || (i === 0 && upcomingType ? upcomingType : this.chooseSessionType(simulated, day.date));
+        day.sessionType = picked;
+        day.sessionOverridden = !!ov;
+        simulated.push({ date: day.date, sessionType: picked, completed: true });
       });
 
     const trainDays = days.filter((day) => day.kind === "train" && day.date >= today);
@@ -529,10 +537,12 @@ const CoachEngine = {
     return rules.tier === "building" ? "構築期" : "漸進期";
   },
 
-  nextSessionType(last, weeklyPlan) {
-    if (!last) return weeklyPlan.suggestedOrder[0] || "A";
-    const rotation = { A: "B", B: "C", C: "A" };
-    return rotation[last.sessionType] || "A";
+  nextSessionType(last, weeklyPlan, ctx) {
+    const workouts = ctx?.workouts || (last ? [last] : []);
+    const forDate = ctx?.forDate;
+    const override = ctx?.override;
+    if (!last) return override || weeklyPlan.suggestedOrder[0] || "A";
+    return this.chooseSessionType(workouts, forDate, override);
   },
 
   pickPullExercise(lastLog, rules) {
@@ -544,17 +554,84 @@ const CoachEngine = {
     return "lat-pulldown";
   },
 
+  /** 種目ごとの最終実施日を返す。 */
+  lastDoneMap(workouts) {
+    const map = {};
+    (workouts || []).forEach((w) => {
+      (w.exercises || []).forEach((row) => {
+        if (row && row.sets && row.sets.some((s) => s.reps > 0)) {
+          if (!map[row.id] || w.date > map[row.id]) map[row.id] = w.date;
+        }
+      });
+    });
+    return map;
+  },
+
+  /**
+   * 固定メニューではなく、間隔が空いている種目を優先して組み立てる。
+   * core は毎回入れる主要種目、残りは pool から「久しくやっていない順」に選ぶ。
+   * 同じ内容が続かず、特定の種目だけ抜け落ちることも無くなる。
+   */
   baseExercises(type, ctx) {
-    const { lastLog, workouts, rules } = ctx;
-    const analysis = workouts.length ? this.analyzeWorkout(workouts[workouts.length - 1]) : null;
-    if (type === "A") {
-      return ["bench-press", "incline-press", "ohp", "side-raise", "pushdown"];
-    }
-    if (type === "B") {
-      const back = this.pickPullExercise(lastLog, rules);
-      return [back, "barbell-row", "seated-row", "face-pull", "barbell-curl"];
-    }
-    return ["back-squat", "romanian-deadlift", "calf-raise", "face-pull", "hammer-curl", "core"];
+    const { lastLog, workouts, rules, forDate } = ctx;
+    const plan = SESSION_PLAN[type];
+    if (!plan) return [];
+    const today = forDate || this.fmtDate(new Date());
+
+    const chosen = [];
+    if (type === "B") chosen.push(this.pickPullExercise(lastLog, rules)); // 懸垂かラットプル
+    plan.core.forEach((id) => {
+      if (!chosen.includes(id)) chosen.push(id);
+    });
+
+    const lastDone = this.lastDoneMap(workouts);
+    const dayMs = 86400000;
+    const candidates = plan.pool
+      .filter((id) => !chosen.includes(id))
+      .map((id) => {
+        const d = lastDone[id];
+        return {
+          id,
+          // 未実施は最優先。それ以外は空いた日数が長いほど優先。
+          days: d ? (this.parseYmd(today) - this.parseYmd(d)) / dayMs : 999,
+        };
+      })
+      .sort((a, b) => b.days - a.days || plan.pool.indexOf(a.id) - plan.pool.indexOf(b.id));
+
+    while (chosen.length < plan.size && candidates.length) chosen.push(candidates.shift().id);
+    return chosen;
+  },
+
+  /**
+   * 次にやる種別を決める。A→B→C の固定ローテーションではなく、
+   * 「最後にやってから一番空いている種別」を選ぶ。
+   * 予定が崩れて特定の部位が飛んでも、次に自動で拾い直せる。
+   * 直前と同じ系統（押す/引く/脚）は回復を待つため減点する。
+   */
+  chooseSessionType(workouts, forDate, override) {
+    if (override && SESSION_PLAN[override]) return override;
+    const done = (workouts || []).filter((w) => w.completed);
+    if (!done.length) return "A";
+
+    const dayMs = 86400000;
+    const today = forDate || this.fmtDate(new Date());
+    const lastOf = {};
+    done.forEach((w) => {
+      if (!lastOf[w.sessionType] || w.date > lastOf[w.sessionType]) lastOf[w.sessionType] = w.date;
+    });
+    const last = done[done.length - 1];
+    const lastGap = (this.parseYmd(today) - this.parseYmd(last.date)) / dayMs;
+
+    const types = ["A", "B", "C"];
+    const scored = types.map((t) => {
+      const d = lastOf[t];
+      let score = d ? (this.parseYmd(today) - this.parseYmd(d)) / dayMs : 999;
+      const sameCategory = SESSION_PLAN[t]?.category === SESSION_PLAN[last.sessionType]?.category;
+      if (sameCategory && lastGap < 2) score -= 10; // 中1日未満で同系統は避ける
+      return { type: t, score };
+    });
+    scored.sort((a, b) => b.score - a.score || types.indexOf(a.type) - types.indexOf(b.type));
+    return scored[0].type;
   },
 
   microAdjustExercises(type, weeklyExercises, ctx) {

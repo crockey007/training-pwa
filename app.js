@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 48;
+const APP_VERSION = 49;
 
 const state = {
   view: "today",
@@ -126,6 +126,7 @@ function mergeAll(local, remote) {
     weights: mergeByDate(localOk.weights, remoteOk.weights),
     runs: mergeByDate(localOk.runs, remoteOk.runs),
     scheduleOverrides: { ...(remoteOk.scheduleOverrides || {}), ...(localOk.scheduleOverrides || {}) },
+    sessionOverrides: { ...(remoteOk.sessionOverrides || {}), ...(localOk.sessionOverrides || {}) },
     programVersion: Math.max(Number(localOk.programVersion || 0), Number(remoteOk.programVersion || 0)),
     marathonGoal: localOk.marathonGoal || remoteOk.marathonGoal || null,
     draft: localOk.draft && localOk.draft.date === todayStr() ? localOk.draft : remoteOk.draft ?? localOk.draft,
@@ -419,6 +420,8 @@ function db() {
     draft: data.draft || null,
     coachPlan: data.coachPlan || null,
     runs: data.runs || [],
+    scheduleOverrides: data.scheduleOverrides || {},
+    sessionOverrides: data.sessionOverrides || {},
   };
 }
 
@@ -1240,6 +1243,24 @@ function setDayPlan(date, kind) {
   refreshCoachPlan();
 }
 
+/** その日のセッション種別を手動指定する。type が空なら自動判断へ戻す。 */
+function setSessionType(date, type) {
+  const overrides = { ...(load().sessionOverrides || {}) };
+  if (!type) delete overrides[date];
+  else overrides[date] = type;
+  const next = { sessionOverrides: overrides };
+  // 休養やランの日に種別を指定したら、その日をトレーニング日にする
+  if (type) {
+    const kinds = { ...(load().scheduleOverrides || {}) };
+    if (kinds[date] && kinds[date] !== "train") {
+      kinds[date] = "train";
+      next.scheduleOverrides = kinds;
+    }
+  }
+  patch(next);
+  refreshCoachPlan();
+}
+
 function planSheetHtml() {
   const date = state.planDate;
   if (!date) return "";
@@ -1263,8 +1284,35 @@ function planSheetHtml() {
     <button class="btn ghost" type="button" data-set-plan="${date}:rest" style="margin-top:8px">休養にする</button>
     <button class="btn ghost" type="button" data-set-plan="${date}:run" style="margin-top:8px">ランにする</button>
     ${ov ? `<button class="btn ghost" type="button" data-set-plan="${date}:" style="margin-top:8px">自動の予定に戻す</button>` : ""}
+    ${sessionPickerHtml(date, cal)}
     <button class="btn ghost" type="button" data-log-run="${date}" style="margin-top:8px">Garminの記録を入れる</button>
   </div></div>`;
+}
+
+/** その日のセッション種別（A/B/C）を手動で選ぶ。トレーニング日のときだけ出す。 */
+function sessionPickerHtml(date, cal) {
+  if (!cal || (cal.kind !== "train" && cal.kind !== "done")) return "";
+  if (cal.kind === "done") {
+    return `<p class="muted" style="margin-top:16px">この日は ${cal.sessionType} を実施済みです。種別の変更はできません。</p>`;
+  }
+  const picked = (load().sessionOverrides || {})[date] || "";
+  const auto = cal.sessionType;
+  return `<div style="margin-top:20px">
+    <div class="kicker">メニューの種別</div>
+    <p class="muted" style="margin-top:6px">
+      ${picked ? `手動で <strong>${picked}</strong> を指定中` : `自動判断で <strong>${auto}</strong>（最後にやってから一番日が空いている種別）`}
+    </p>
+    <div class="pills" style="margin-top:10px">
+      ${["A", "B", "C"]
+        .map((t) => {
+          const m = SESSION_META[t];
+          const active = picked ? picked === t : auto === t;
+          return `<button class="pill ${active ? "active" : ""}" type="button" data-set-session="${date}:${t}">${t} ${escapeHtml(m?.name || "")}</button>`;
+        })
+        .join("")}
+    </div>
+    ${picked ? `<button class="btn ghost" type="button" data-set-session="${date}:" style="margin-top:10px">自動判断に戻す</button>` : ""}
+  </div>`;
 }
 
 function restTimerBar() {
@@ -1742,6 +1790,15 @@ function bind() {
       closeOverlay();
     })
   );
+  document.querySelectorAll("[data-set-session]").forEach((el) =>
+    el.addEventListener("click", () => {
+      const raw = el.dataset.setSession || "";
+      const date = raw.slice(0, 10);
+      const type = raw.slice(11);
+      setSessionType(date, type || null);
+      render();
+    })
+  );
   document.querySelectorAll("[data-close-plan]").forEach((el) =>
     el.addEventListener("click", (ev) => {
       if (ev.target === el) closeOverlay();
@@ -2119,7 +2176,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-48.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-49.js").catch(() => {});
   });
 }
 
