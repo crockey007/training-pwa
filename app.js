@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 49;
+const APP_VERSION = 50;
 
 const state = {
   view: "today",
@@ -1029,8 +1029,11 @@ function imgSrc(id) {
   return `./images/${id}.jpg`;
 }
 
+// 解説画像がまだ用意できていない種目でも、壊れた画像アイコンを出さずに済ませる
+const IMG_FALLBACK = `this.onerror=null;this.closest('.hero-still,.ex-item,.motion-wrap')?.classList.add('no-image');this.style.display='none'`;
+
 function motionThumb(id) {
-  return `<img class="motion-thumb" src="${imgSrc(id)}" alt="" />`;
+  return `<img class="motion-thumb" src="${imgSrc(id)}" alt="" onerror="${IMG_FALLBACK}" />`;
 }
 
 function exerciseCard(id, extra = "") {
@@ -1628,7 +1631,7 @@ function sheetHtml() {
       <span class="hero-tag">${escapeHtml(ex.muscle)}</span>
     </div>
     <div class="hero-still">
-      <img src="${imgSrc(ex.id)}" alt="${escapeHtml(ex.name)}の動作（開始・中間・終了）" />
+      <img src="${imgSrc(ex.id)}" alt="${escapeHtml(ex.name)}の動作（開始・中間・終了）" onerror="${IMG_FALLBACK}" />
       <div class="motion-phases still"><span>開始</span><span>中間</span><span>終了</span></div>
     </div>
     <div class="sheet-body">
@@ -2176,7 +2179,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-49.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-50.js").catch(() => {});
   });
 }
 

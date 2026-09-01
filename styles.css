@@ -1021,3 +1021,18 @@ h3 {
   -webkit-appearance: none;
   appearance: none;
 }
+
+/* 解説画像が未用意の種目。枠と「開始・中間・終了」の帯を隠して間延びを防ぐ */
+.hero-still.no-image {
+  min-height: 0;
+  background: linear-gradient(160deg, #1a1f26, #11151a);
+  aspect-ratio: auto;
+  padding: 28px 0;
+}
+.hero-still.no-image .motion-phases {
+  display: none;
+}
+.ex-item.no-image .motion-thumb,
+.motion-wrap.no-image .motion-thumb {
+  display: none;
+}

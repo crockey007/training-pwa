@@ -52,8 +52,8 @@
   </head>
   <body>
     <main>
-      <h1>v49 に更新します</h1>
-      <p>メニューの種別を手動で変更できるようにし、種目も毎回入れ替わるようにします。</p>
+      <h1>v50 に更新します</h1>
+      <p>脚と体幹の種目を5つ追加します（フロントスクワット、ブルガリアン、ヒップスラスト等）。</p>
       <p id="msg">古い画面を捨てて、アプリを開き直します。</p>
       <button type="button" id="go">更新してアプリを開く</button>
     </main>
@@ -80,7 +80,7 @@
         await new Promise(function (resolve) { setTimeout(resolve, 1200); });
         var dest = new URL("./index.html", location.href);
         dest.searchParams.set("t", String(Date.now()));
-        dest.searchParams.set("v", "49");
+        dest.searchParams.set("v", "50");
         location.replace(dest.href);
       }
       document.getElementById("go").addEventListener("click", refreshApp);

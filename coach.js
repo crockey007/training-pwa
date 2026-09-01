@@ -578,13 +578,20 @@ const CoachEngine = {
     if (!plan) return [];
     const today = forDate || this.fmtDate(new Date());
 
+    const lastDone = this.lastDoneMap(workouts);
     const chosen = [];
     if (type === "B") chosen.push(this.pickPullExercise(lastLog, rules)); // 懸垂かラットプル
-    plan.core.forEach((id) => {
+    // スクワット系は毎回入れるが、久しくやっていない方を選んで刺激を変える
+    if (plan.squatRotation && plan.squatRotation.length) {
+      const pick = plan.squatRotation
+        .map((id) => ({ id, date: lastDone[id] || "" }))
+        .sort((a, b) => a.date.localeCompare(b.date))[0];
+      if (pick) chosen.push(pick.id);
+    }
+    (plan.core || []).forEach((id) => {
       if (!chosen.includes(id)) chosen.push(id);
     });
 
-    const lastDone = this.lastDoneMap(workouts);
     const dayMs = 86400000;
     const candidates = plan.pool
       .filter((id) => !chosen.includes(id))
@@ -598,7 +605,24 @@ const CoachEngine = {
       })
       .sort((a, b) => b.days - a.days || plan.pool.indexOf(a.id) - plan.pool.indexOf(b.id));
 
-    while (chosen.length < plan.size && candidates.length) chosen.push(candidates.shift().id);
+    // 同じ動作パターン（ヒンジ、腹筋など）を1セッションに重複させない。
+    // ルーマニアンデッドリフトとグッドモーニングを同日に入れても効率が悪いため。
+    const usedPatterns = new Set(
+      chosen.map((id) => EXERCISE_MAP[id]?.pattern).filter(Boolean)
+    );
+    const skipped = [];
+    while (chosen.length < plan.size && candidates.length) {
+      const next = candidates.shift();
+      const pattern = EXERCISE_MAP[next.id]?.pattern;
+      if (pattern && usedPatterns.has(pattern)) {
+        skipped.push(next);
+        continue;
+      }
+      if (pattern) usedPatterns.add(pattern);
+      chosen.push(next.id);
+    }
+    // パターン制限で埋まらなかった分は、重複を許してでも種目数を確保する
+    while (chosen.length < plan.size && skipped.length) chosen.push(skipped.shift().id);
     return chosen;
   },
 
