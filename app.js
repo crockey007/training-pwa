@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 50;
+const APP_VERSION = 51;
 
 const state = {
   view: "today",
@@ -1029,8 +1029,11 @@ function imgSrc(id) {
   return `./images/${id}.jpg`;
 }
 
-// 解説画像がまだ用意できていない種目でも、壊れた画像アイコンを出さずに済ませる
-const IMG_FALLBACK = `this.onerror=null;this.closest('.hero-still,.ex-item,.motion-wrap')?.classList.add('no-image');this.style.display='none'`;
+// 解説画像は .jpg を基本にしつつ、無ければ .png を試す（画像生成ツールの
+// 既定出力が png のことが多く、変換の手間を省くため）。両方無ければ枠ごと隠す。
+const IMG_FALLBACK =
+  `if(!this.dataset.tryPng){this.dataset.tryPng=1;this.src=this.src.replace(/\\.jpg(\\?.*)?$/,'.png');return;}` +
+  `this.onerror=null;this.closest('.hero-still,.ex-item,.motion-wrap')?.classList.add('no-image');this.style.display='none';`;
 
 function motionThumb(id) {
   return `<img class="motion-thumb" src="${imgSrc(id)}" alt="" onerror="${IMG_FALLBACK}" />`;
@@ -2179,7 +2182,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-50.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-51.js").catch(() => {});
   });
 }
 
