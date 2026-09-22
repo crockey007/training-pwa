@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 53;
+const APP_VERSION = 54;
 
 const state = {
   view: "today",
@@ -230,7 +230,8 @@ function restoreKnownHistoryIfNeeded() {
   if (typeof MAC_BACKUP === "undefined") return;
   const current = load();
   const knownDates = new Set((current.workouts || []).map((w) => w.date));
-  const missingWorkout = ["2026-08-17", "2026-08-20", "2026-08-23"].some((date) => !knownDates.has(date));
+  const mustHave = ["2026-08-17", "2026-08-20", "2026-08-23", "2026-09-19", "2026-09-20"];
+  const missingWorkout = mustHave.some((date) => !knownDates.has(date));
   const missingBody = !(current.weights || []).some((row) => row.date === "2026-08-17");
   const missingRuns = (current.runs || []).filter((row) => row.done || row.km > 0).length < 3;
   if (!missingWorkout && !missingBody && !missingRuns) return;
@@ -239,16 +240,17 @@ function restoreKnownHistoryIfNeeded() {
     ...(merged.scheduleOverrides || {}),
     ...(MAC_BACKUP.scheduleOverrides || {}),
   };
+  merged.sessionOverrides = {
+    ...(merged.sessionOverrides || {}),
+    ...(MAC_BACKUP.sessionOverrides || {}),
+  };
   save(merged);
 }
 
 function needsMacRestore() {
   if (typeof MAC_BACKUP === "undefined") return false;
   const dates = new Set(completedWorkouts().map((w) => w.date));
-  if (!dates.has("2026-08-17") || !dates.has("2026-08-20") || !dates.has("2026-08-23")) return true;
-  const cal = state.coachPlan?.weekSchedule?.days || [];
-  const todayCal = cal.find((d) => d.date === todayStr());
-  return false;
+  return !dates.has("2026-09-19") || !dates.has("2026-09-20");
 }
 
 function migrateProgramV39() {
@@ -288,6 +290,37 @@ function migrateProgramV53() {
     "2026-09-26": "A",
   };
   data.programVersion = 53;
+  save(data);
+}
+
+function migrateProgramV54() {
+  const data = load();
+  if (Number(data.programVersion || 0) >= 54) return;
+  if (typeof MAC_BACKUP !== "undefined") {
+    const merged = mergeAll(data, MAC_BACKUP);
+    merged.scheduleOverrides = {
+      ...(merged.scheduleOverrides || {}),
+      ...(MAC_BACKUP.scheduleOverrides || {}),
+      "2026-09-21": "run",
+      "2026-09-22": "rest",
+      "2026-09-23": "train",
+      "2026-09-24": "run",
+      "2026-09-25": "duty",
+      "2026-09-26": "train",
+      "2026-09-27": "run",
+    };
+    merged.sessionOverrides = {
+      ...(merged.sessionOverrides || {}),
+      ...(MAC_BACKUP.sessionOverrides || {}),
+      "2026-09-23": "C",
+      "2026-09-26": "A",
+    };
+    if (MAC_BACKUP.marathonGoal) merged.marathonGoal = MAC_BACKUP.marathonGoal;
+    merged.programVersion = 54;
+    save(merged);
+    return;
+  }
+  data.programVersion = 54;
   save(data);
 }
 
@@ -953,10 +986,10 @@ function todayHtml() {
     </section>
     ${needsMacRestore()
       ? `<section class="card accent">
-      <div class="kicker">メニュー修正</div>
-      <h2 style="margin-top:8px">今日をA（押す）にする</h2>
-      <p class="muted">8/23の翌日なので自動では空けていました。押すと今日をトレーニング日にします。</p>
-      <button class="btn" type="button" data-restore-mac="1">過去の記録を復元</button>
+      <div class="kicker">重量の反映</div>
+      <h2 style="margin-top:8px">最新の重量記録を入れる</h2>
+      <p class="muted">9/19 A・9/20 B など、バックアップの実重量を書き込みます。提案がその重量になります。</p>
+      <button class="btn" type="button" data-restore-mac="1">重量記録を反映</button>
     </section>`
       : ""}
     ${weekCalendarHtml()}
@@ -1616,7 +1649,7 @@ function lifeHtml() {
       <p class="muted">記録はiPhoneのこのアプリ内に保存されます。Mac同期はありません。機種変更・再インストール・URL変更のときは、下で書き出し／読み込みしてください。</p>
       ${
         typeof MAC_BACKUP !== "undefined"
-          ? `<button class="btn" type="button" data-restore-mac="1" style="margin-top:12px">8/17〜23の記録を復元</button>`
+          ? `<button class="btn" type="button" data-restore-mac="1" style="margin-top:12px">バックアップの重量記録を反映</button>`
           : ""
       }
       <button class="btn" type="button" data-export="1" style="margin-top:12px">記録を書き出す</button>
@@ -2180,6 +2213,7 @@ function bootstrap() {
   restoreKnownHistoryIfNeeded();
   migrateProgramV39();
   migrateProgramV53();
+  migrateProgramV54();
   state.coachPlan = load().coachPlan || null;
   try {
     correctAugust17Weights();
@@ -2205,7 +2239,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-53.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-54.js").catch(() => {});
   });
 }
 

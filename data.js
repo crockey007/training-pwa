@@ -6,7 +6,6 @@ const PROFILE = {
   proteinTargetG: 130,
   startDate: "2026-08-17",
   barKg: 10,
-
   weeklyTrainingMin: 2,
   weeklyTrainingMax: 3,
   marathonDate: "2026-12-13",
@@ -110,7 +109,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 30,
+    startWeight: 40,
     restSec: 120,
     setup: [
       "ベンチをラックの中央に置き、フラット（水平）にする。",
@@ -142,7 +141,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 20,
+    startWeight: 27.5,
     restSec: 120,
     setup: [
       "ベンチの角度は30〜45度。60度以上だと肩プレスに近くなる。",
@@ -171,7 +170,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 10,
+    startWeight: 15,
     restSec: 120,
     setup: [
       "Jカップを鎖骨〜肩の高さにセット。立ってバーを受け取れる位置。",
@@ -314,7 +313,7 @@ const EXERCISES = [
     repMin: 8,
     repMax: 12,
     incrementKg: 2.5,
-    startWeight: 25,
+    startWeight: 30,
     restSec: 90,
     setup: [
       "ラック背面の低プーリーにハンドル（Vバーや両手持ち）を付ける。",
@@ -369,7 +368,7 @@ const EXERCISES = [
     repMin: 10,
     repMax: 15,
     incrementKg: 2.5,
-    startWeight: 15,
+    startWeight: 17.5,
     restSec: 75,
     setup: [
       "肩幅でバーを持つ。肘は体側。",
@@ -396,7 +395,7 @@ const EXERCISES = [
     repMin: 12,
     repMax: 15,
     incrementKg: 2.5,
-    startWeight: 10,
+    startWeight: 15,
     restSec: 60,
     setup: [
       "高プーリーを顔の高さか、それより少し上に。",
@@ -423,7 +422,7 @@ const EXERCISES = [
     repMin: 12,
     repMax: 15,
     incrementKg: 1.25,
-    startWeight: 2.5,
+    startWeight: 3.8,
     restSec: 60,
     setup: [
       "ダンベルがないので、プレートの縁または穴を持つ。",
@@ -478,7 +477,7 @@ const EXERCISES = [
     repMin: 10,
     repMax: 15,
     incrementKg: 1.25,
-    startWeight: 5,
+    startWeight: 7.5,
     restSec: 75,
     setup: [
       "プレートの穴に手を通し、ハンマー（親指が上）の向きで持つ。",
