@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 52;
+const APP_VERSION = 53;
 
 const state = {
   view: "today",
@@ -266,6 +266,28 @@ function migrateProgramV39() {
   };
   data.programVersion = 39;
   data.marathonGoal = { date: "2026-12-13", target: "sub4", weeklyRuns: 3 };
+  save(data);
+}
+
+function migrateProgramV53() {
+  const data = load();
+  if (Number(data.programVersion || 0) >= 53) return;
+  data.scheduleOverrides = {
+    ...(data.scheduleOverrides || {}),
+    "2026-09-21": "run",
+    "2026-09-22": "rest",
+    "2026-09-23": "train",
+    "2026-09-24": "run",
+    "2026-09-25": "duty",
+    "2026-09-26": "train",
+    "2026-09-27": "run",
+  };
+  data.sessionOverrides = {
+    ...(data.sessionOverrides || {}),
+    "2026-09-23": "C",
+    "2026-09-26": "A",
+  };
+  data.programVersion = 53;
   save(data);
 }
 
@@ -2157,6 +2179,7 @@ async function onAppVisible() {
 function bootstrap() {
   restoreKnownHistoryIfNeeded();
   migrateProgramV39();
+  migrateProgramV53();
   state.coachPlan = load().coachPlan || null;
   try {
     correctAugust17Weights();
@@ -2182,7 +2205,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-52.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-53.js").catch(() => {});
   });
 }
 

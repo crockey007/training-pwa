@@ -240,12 +240,13 @@ const CoachEngine = {
       for (let i = 0; i < 8; i++) {
         const gap = (this.parseYmd(cursor) - this.parseYmd(lastTrain)) / 86400000;
         if (gap >= 2 && !blocked(cursor)) {
+          const futureType = this.chooseSessionType(simulated, cursor);
           nextDate = cursor;
-          nextSessionType = typeCursor;
+          nextSessionType = futureType;
           nextWeekHint = {
             date: cursor,
             weekday: "月火水木金土日"[(this.parseYmd(cursor).getDay() + 6) % 7],
-            sessionType: typeCursor,
+            sessionType: futureType,
           };
           break;
         }
@@ -409,7 +410,9 @@ const CoachEngine = {
     const racePaceSec = goal.seconds / RUN_PLAN.marathonKm;
     const tempoFinalSec = racePaceSec - 20; // 閾値ペースの最終形
     const hasData = stats.easySec > 0;
-    const easySec = hasData ? stats.easySec : racePaceSec + 70;
+    // 種別未入力の速いランをEランと誤認しない。サブ4向けEペースは
+    // 少なくとも目標マラソンペースより40秒/km遅くする。
+    const easySec = hasData ? Math.max(stats.easySec, racePaceSec + 40) : racePaceSec + 70;
 
     // テンポは「今のEペース −35秒」から始め、レースまでに閾値ペースへ寄せる
     const tempoStart = easySec - 35;

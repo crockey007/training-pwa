@@ -1,11 +1,12 @@
 const PROFILE = {
   // 公開版では個人の身体データを持たない。実際の値は端末内の記録から読む。
-  // ここの数値は記録が1件も無いときだけ使われる中立な初期値。
+  // ここの数値は記録が1件も無いときの中立な初期値。
   startWeightKg: 70,
   startBodyFat: 20,
   proteinTargetG: 130,
   startDate: "2026-08-17",
   barKg: 10,
+
   weeklyTrainingMin: 2,
   weeklyTrainingMax: 3,
   marathonDate: "2026-12-13",
@@ -67,18 +68,16 @@ const SESSION_PLAN = {
   C: {
     category: "legs",
     // スクワット系は毎回やるが、フロント/バックを交互にして刺激を変える
-    core: [],
+    core: ["calf-raise", "hanging-leg-raise"],
     squatRotation: ["back-squat", "front-squat"],
     pool: [
       "romanian-deadlift",
       "good-morning",
       "split-squat",
       "hip-thrust",
-      "calf-raise",
       "core",
-      "hanging-leg-raise",
     ],
-    size: 5,
+    size: 4,
   },
 };
 
