@@ -1,5 +1,5 @@
 const KEY = "home-gym-v1";
-const APP_VERSION = 51;
+const APP_VERSION = 52;
 
 const state = {
   view: "today",
@@ -2182,7 +2182,7 @@ function bootstrap() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw-51.js").catch(() => {});
+    navigator.serviceWorker.register("./sw-52.js").catch(() => {});
   });
 }
 
